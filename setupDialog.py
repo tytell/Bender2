@@ -11,6 +11,10 @@ import itertools
 from setup_ui import Ui_SetupDialog
 from settings import SETTINGS_FILE
 
+class Bundle(object):
+    def __init__(self, **kwds):
+        self.__dict__.update(kwds)
+
 class SetupDialog(QtGui.QDialog):
     def __init__(self):
         super(SetupDialog, self).__init__()
@@ -44,7 +48,8 @@ class SetupDialog(QtGui.QDialog):
                                 ('Output', [ui.outputFrequencyBox, ui.leftStimEdit, ui.rightStimEdit, ui.digitalPortEdit]),
                                 ('Motor', [ui.motorMaxSpeedBox, ui.motorMinPulseFreqBox, ui.motorMaxPulseFreqBox]),
                                 ('Stimulus', [ui.stimulusTypeTab, ui.bendFrequencyBox, ui.bendAmplitudeBox,
-                                              ui.bendCyclesBox, ui.actStartCycleBox, ui.stimPhaseBox, ui.stimPulseRateBox,
+                                              ui.bendCyclesBox, ui.actStartCycleBox, ui.stimPhaseBox,
+                                              ui.stimDutyCycleBox, ui.stimPulseRateBox,
                                               ui.leftStimCheck, ui.leftVoltageBox, ui.leftVoltageScale,
                                               ui.rightStimCheck, ui.rightVoltageBox, ui.rightVoltageScale,
                                               ui.freqSweepStartFreqBox, ui.freqSweepEndFreqBox,
@@ -245,15 +250,15 @@ class SetupDialog(QtGui.QDialog):
         return filename
 
     def getValues(self):
-        self.input = {'frequency': self.ui.inputFrequencyBox.value(),
-                      'xForce': self.ui.xForceEdit.text(),
-                      'yForce': self.ui.yForceEdit.text(),
-                      'zForce': self.ui.zForceEdit.text(),
-                      'xTorque': self.ui.xTorqueEdit.text(),
-                      'yTorque': self.ui.yTorqueEdit.text(),
-                      'zTorque': self.ui.zTorqueEdit.text(),
-                      'encoder': self.ui.encoderChannelEdit.text(),
-                      'encoderCountsPerRev': self.ui.countsPerRevBox.value()}
+        self.input = Bundle(frequency=self.ui.inputFrequencyBox.value(),
+                            xForce=self.ui.xForceEdit.text(),
+                            yForce=self.ui.yForceEdit.text(),
+                            zForce=self.ui.zForceEdit.text(),
+                            xTorque=self.ui.xTorqueEdit.text(),
+                            yTorque=self.ui.yTorqueEdit.text(),
+                            zTorque=self.ui.zTorqueEdit.text(),
+                            encoder=self.ui.encoderChannelEdit.text(),
+                            encoderCountsPerRev=self.ui.countsPerRevBox.value())
 
         cal = []
         for widgets in self.calibrationBoxes:
@@ -263,29 +268,31 @@ class SetupDialog(QtGui.QDialog):
             cal.append(row)
         self.calibration = np.array(cal)
 
-        self.output = {'frequency': self.ui.outputFrequencyBox.value(),
-                       'leftStim': self.ui.leftStimEdit.text(),
-                       'rightStim': self.ui.rightStimEdit.text(),
-                       'digitalPort': self.ui.digitalPortEdit.text(),
-                       'motorMaxSpeed': self.ui.motorMaxSpeedBox.value(),
-                       'motorMinFreq': self.ui.motorMinPulseFreqBox.value(),
-                       'motorMaxFreq': self.ui.motorMaxPulseFreqBox.value()}
+        self.output = Bundle(frequency=self.ui.outputFrequencyBox.value(),
+                             leftStim=self.ui.leftStimEdit.text(),
+                             rightStim=self.ui.rightStimEdit.text(),
+                             digitalPort=self.ui.digitalPortEdit.text(),
+                             motorMaxSpeed=self.ui.motorMaxSpeedBox.value(),
+                             motorMinFreq=self.ui.motorMinPulseFreqBox.value(),
+                             motorMaxFreq=self.ui.motorMaxPulseFreqBox.value())
 
         if self.ui.stimulusTypeTab.currentIndex() == 0:
-            self.stim = {'type': 'sine',
-                         'frequency': self.ui.bendFrequencyBox.value(),
-                         'amplitude': self.ui.bendAmplitudeBox.value(),
-                         'cycles': self.ui.bendCyclesBox.value(),
-                         'actStartCycle': self.ui.actStartCycleBox.value(),
-                         'stimPhase': self.ui.stimPhaseBox.value(),
-                         'isLeftStim': self.ui.leftStimCheck.isChecked(),
-                         'leftStimVolts': self.ui.leftVoltageBox.value(),
-                         'leftVoltScale': self.ui.leftVoltageScale.value(),
-                         'isRightStim': self.ui.rightStimCheck.isChecked(),
-                         'rightStimVolts': self.ui.rightVoltageBox.value(),
-                         'rightVoltScale': self.ui.rightVoltageScale.value(),
-                         'waitPre': self.ui.waitPreBox.value(),
-                         'waitPost': self.ui.waitPostBox()}
+            self.stim = Bundle(type='sine',
+                               frequency=self.ui.bendFrequencyBox.value(),
+                               amplitude=self.ui.bendAmplitudeBox.value(),
+                               cycles=self.ui.bendCyclesBox.value(),
+                               actStartCycle=self.ui.actStartCycleBox.value(),
+                               actPhase=self.ui.stimPhaseBox.value(),
+                               actPulseRate=self.ui.stimPulseRateBox.value(),
+                               actDuty=self.ui.stimDutyCycleBox.value(),
+                               isLeftStim=self.ui.leftStimCheck.isChecked(),
+                               leftStimVolts=self.ui.leftVoltageBox.value(),
+                               leftVoltScale=self.ui.leftVoltageScale.value(),
+                               isRightStim=self.ui.rightStimCheck.isChecked(),
+                               rightStimVolts=self.ui.rightVoltageBox.value(),
+                               rightVoltScale=self.ui.rightVoltageScale.value(),
+                               waitPre=self.ui.waitPreBox.value(),
+                               waitPost=self.ui.waitPostBox())
         elif self.ui.stimulusTypeTab.currentIndex() == 1:
             if self.ui.freqSweepTypeBox.currentIndex() == 0:
                 fstype = 'exponential'
@@ -294,22 +301,22 @@ class SetupDialog(QtGui.QDialog):
             else:
                 assert False
 
-            self.stim = {'type': 'frequencysweep',
-                         'startfreq': self.ui.freqSweepStartFreqBox.value(),
-                         'endfreq': self.ui.freqSweepEndFreqBox.value(),
-                         'frequencySweepType': fstype,
-                         'duration': self.ui.freqSweepDurationBox.value(),
-                         'amplitude': self.ui.freqSweepAmplitudeBox.value(),
-                         'frequencyExponent': self.ui.freqSweepFreqExponentBox.value(),
-                         'waitPre': self.ui.waitPreBox.value(),
-                         'waitPost': self.ui.waitPostBox()}
+            self.stim = Bundle(type='frequencysweep',
+                               startfreq=self.ui.freqSweepStartFreqBox.value(),
+                               endfreq=self.ui.freqSweepEndFreqBox.value(),
+                               frequencySweepType=fstype,
+                               duration=self.ui.freqSweepDurationBox.value(),
+                               amplitude=self.ui.freqSweepAmplitudeBox.value(),
+                               frequencyExponent=self.ui.freqSweepFreqExponentBox.value(),
+                               waitPre=self.ui.waitPreBox.value(),
+                               waitPost=self.ui.waitPostBox())
 
-        self.setupGeometry = {'dOutVert': self.ui.doutVertBox.value(),
-                              'dOutHoriz': self.ui.doutHorizBox.value(),
-                              'dIn': self.ui.dinBox.value(),
-                              'dClamp': self.ui.dclampBox.value(),
-                              'width': self.ui.widthBox.value(),
-                              'height': self.ui.heightBox.value()}
+        self.setupGeometry = Bundle(dOutVert=self.ui.doutVertBox.value(),
+                                    dOutHoriz=self.ui.doutHorizBox.value(),
+                                    dIn=self.ui.dinBox.value(),
+                                    dClamp=self.ui.dclampBox.value(),
+                                    width=self.ui.widthBox.value(),
+                                    height=self.ui.heightBox.value())
 
         self.outputFilePath = self.ui.outputPathEdit.text()
         self.outputFilePattern = self.ui.fileNamePatternEdit.text()
