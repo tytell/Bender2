@@ -16,6 +16,31 @@ from settings import SETTINGS_FILE
 
 assert qt_compat.QT_API == qt_compat.QT_API_PYQT
 
+class BenderDAQ(object):
+    def __init__(self, input, output, stim, geometry, outfilename):
+        self.input = input
+        self.output = output
+        self.stim = stim
+        self.geometry = geometry
+        self.outfilename = outfilename
+
+    def make_stimulus(self):
+        if self.stim['type'] == 'sine':
+            self.make_sine_stimulus()
+        elif self.stim['type'] == 'frequencySweep':
+            self.make_freqsweep_stimulus()
+        else:
+            assert False
+
+    def make_sine_stimulus(self):
+        dur = self.stim['waitPre'] + self.stim['cycles']/self.stim['frequency'] + \
+            self.stim['waitPost']
+
+        t = np.arange(0.0,dur, 1/self.output['frequency']) - self.stim['waitPre']
+        
+        pos = self.stim['amplitude'] * np.sin(2*np.pi*self.stim['frequency']*t)
+    def setup_channels(self):
+        pass
 
 class MplCanvas(FigureCanvas):
     """Ultimately, this is a QWidget (as well as a FigureCanvasAgg, etc.)."""
@@ -26,7 +51,7 @@ class MplCanvas(FigureCanvas):
         # We want the axes cleared every time plot() is called
         self.axes.hold(False)
 
-        self.compute_initial_figure()
+        # self.compute_initial_figure()
 
         #
         FigureCanvas.__init__(self, fig)
@@ -37,9 +62,6 @@ class MplCanvas(FigureCanvas):
                                    QtGui.QSizePolicy.Expanding)
         FigureCanvas.updateGeometry(self)
 
-    def compute_initial_figure(self):
-        pass
-
 
 class BenderWindow(QtGui.QWidget):
     def __init__(self):
@@ -48,11 +70,23 @@ class BenderWindow(QtGui.QWidget):
         doneButton = QtGui.QPushButton("Done")
         doneButton.clicked.connect(self.close)
 
+        self.forceAxes = MplCanvas(self)
+        self.torqueAxes = MplCanvas(self)
+        grid = QtGui.QGridLayout()
+        grid.addWidget(self.forceAxes, 0,0)
+        grid.addWidget(self.torqueAxes, 0,1)
+
+        self.forceAxes.axes.plot([0, 1, 2, 3],[1, 2, 5, 1],'ro-')
+        self.forceAxes.axes.set_ylabel('Force (N)')
+        self.torqueAxes.axes.plot([0, 1, 2, 3],[8, 1, 2, 1],'gs-')
+        self.torqueAxes.axes.set_ylabel('Torque (N m)')
+
         hbox = QtGui.QHBoxLayout()
         hbox.addStretch(1)
         hbox.addWidget(doneButton)
 
         vbox = QtGui.QVBoxLayout()
+        vbox.addLayout(grid)
         vbox.addStretch(1)
         vbox.addLayout(hbox)
 
@@ -83,7 +117,6 @@ class BenderWindow(QtGui.QWidget):
         if not setup.exec_():
             return False
 
-        logging.debug('setup!')
         self.show()
         return True
 
