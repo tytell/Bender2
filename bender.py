@@ -1,6 +1,7 @@
 from __future__ import print_function, unicode_literals
 import sys
 import os
+import string
 import logging
 from PyQt4 import QtGui, QtCore
 import xml.etree.ElementTree as ET
@@ -44,75 +45,187 @@ class BenderDAQ(object):
             assert False
 
     def make_sine_stimulus(self):
+        try:
+            _ = self.params['Stimulus', 'Parameters', 'Cycles']
+        except Exception:
+            self.pos = None
+            self.vel = None
+            self.t = None
+            return
+
         logging.debug('Stimulus.wait before = {}'.format(self.params['Stimulus', 'Wait before']))
         stim = self.params.child('Stimulus', 'Parameters')
         dur = self.params['Stimulus', 'Wait before'] + stim['Cycles'] / stim['Frequency'] + \
               self.params['Stimulus', 'Wait after']
         self.duration = dur
 
-        tout = np.arange(0.0, dur, 1 / self.params['DAQ', 'Output', 'Sampling frequency']) - \
+        t = np.arange(0.0, dur, 1 / self.params['DAQ', 'Input', 'Sampling frequency']) - \
                self.params['Stimulus', 'Wait before']
 
-        pos = stim['Amplitude'] * np.sin(2 * np.pi * stim['Frequency'] * tout)
-        pos[tout < 0] = 0
-        pos[tout > stim['Cycles'] / stim['Frequency']] = 0
+        pos = stim['Amplitude'] * np.sin(2 * np.pi * stim['Frequency'] * t)
+        pos[t < 0] = 0
+        pos[t > stim['Cycles'] / stim['Frequency']] = 0
 
         vel = 2.0 * np.pi * stim['Frequency'] * stim['Amplitude'] * \
-              np.sin(2 * np.pi * stim['Frequency'] * tout)
-        vel[tout < 0] = 0
-        vel[tout > stim['Cycles'] / stim['Frequency']] = 0
+              np.sin(2 * np.pi * stim['Frequency'] * t)
+        vel[t < 0] = 0
+        vel[t > stim['Cycles'] / stim['Frequency']] = 0
 
-        phase = tout * stim['Frequency']
-        phase[tout < 0] = -1
-        phase[tout > stim['Cycles'] / stim['Frequency']] = -1
+        phase = t * stim['Frequency']
+        phase[t < 0] = -1
+        phase[t > stim['Cycles'] / stim['Frequency']] = -1
 
-        # self.digital_out_data = self.make_motor_pulses(tout, vel)
+        # self.digital_out_data = self.make_motor_pulses(t, vel)
 
         # make activation
         actburstdur = stim['Activation','Duty']/100.0 / stim['Frequency']
         actburstdur = np.floor(actburstdur * stim['Activation','Pulse rate'] * 2) / (stim['Activation','Pulse rate'] * 2)
         actburstduty = actburstdur * stim['Frequency']
 
-        actpulsephase = tout[np.logical_and(tout > 0, tout < actburstdur)] * stim['Activation','Pulse rate']
+        actpulsephase = t[np.logical_and(t > 0, t < actburstdur)] * stim['Activation','Pulse rate']
         burst = (np.mod(actpulsephase, 1) < 0.5).astype(np.float)
 
         bendphase = phase - 0.25
         bendphase[phase == -1] = -1
 
-        Lactcmd = np.zeros_like(tout)
-        Ractcmd = np.zeros_like(tout)
+        Lactcmd = np.zeros_like(t)
+        Ractcmd = np.zeros_like(t)
         Lonoff = []
         Ronoff = []
-        for c in range(int(stim['Activation','Start cycle']), int(stim['Cycles'])):
-            tstart = (c - 0.25 + stim['Activation','Phase']) / stim['Frequency']
-            tend = tstart + actburstdur
-            Lonoff.append([tstart, tend])
-            Ronoff.append(np.array([tstart, tend]) + 0.5/stim['Frequency'])
 
-            np.place(Lactcmd, np.logical_and(bendphase >= c + stim['Activation','Phase'],
-                                             bendphase < c + stim['Activation','Phase'] + actburstduty),
-                     burst)
+        if stim['Activation', 'On']:
+            actphase = stim['Activation', 'Phase'] / 100.0
+            for c in range(int(stim['Activation', 'Start cycle']), int(stim['Cycles'])):
+                tstart = (c - 0.25 + actphase) / stim['Frequency']
+                tend = tstart + actburstdur
 
-            np.place(Ractcmd, np.logical_and(bendphase >= c + 0.5 + stim['Activation','Phase'],
-                                             bendphase < c + 0.5 + stim['Activation','Phase'] + actburstduty),
-                     burst)
+                if stim['Activation', 'Left voltage'] != 0:
+                    Lonoff.append([tstart, tend])
+                    np.place(Lactcmd, np.logical_and(bendphase >= c + actphase,
+                                                     bendphase < c + actphase + actburstduty),
+                             burst)
+                if stim['Activation', 'Right voltage'] != 0:
+                    Ronoff.append(np.array([tstart, tend]) + 0.5/stim['Frequency'])
 
-        Lactcmd = Lactcmd * stim['Activation','Left voltage'] / stim['Activation','Left voltage scale']
-        Ractcmd = Ractcmd * stim['Activation','Right voltage'] / stim['Activation','Right voltage scale']
+                    np.place(Ractcmd, np.logical_and(bendphase >= c + 0.5 + actphase,
+                                                     bendphase < c + 0.5 + actphase + actburstduty),
+                             burst)
+
+            Lactcmd = Lactcmd * stim['Activation','Left voltage'] / stim['Activation','Left voltage scale']
+            Ractcmd = Ractcmd * stim['Activation','Right voltage'] / stim['Activation','Right voltage scale']
 
         self.analog_out_data = np.row_stack((Lactcmd, Ractcmd))
 
-        self.t = np.arange(0.0, dur, 1 / self.params['DAQ', 'Input', 'Sampling frequency']) - \
-                 self.params['Stimulus', 'Wait before']
-        self.pos = interpolate.interp1d(tout, pos, assume_sorted=True)(self.t)
-        self.vel = interpolate.interp1d(tout, vel, assume_sorted=True)(self.t)
+        self.t = t
+        self.pos = pos
+        self.vel = vel
 
-        self.Lact = interpolate.interp1d(tout, Lactcmd, assume_sorted=True)(self.t)
-        self.Ract = interpolate.interp1d(tout, Ractcmd, assume_sorted=True)(self.t)
+        self.Lact = Lactcmd
+        self.Ract = Ractcmd
         self.Lonoff = np.array(Lonoff)
         self.Ronoff = np.array(Ronoff)
 
+    def make_freqsweep_stimulus(self):
+        try:
+            _ = self.params['Stimulus', 'Parameters', 'Duration']
+        except Exception:
+            self.pos = None
+            self.vel = None
+            self.t = None
+            return
+
+        stim = self.params.child('Stimulus', 'Parameters')
+
+        dur = stim['Duration']
+
+        totaldur = self.params['Stimulus', 'Wait before'] + stim['Duration'] + \
+                   self.params['Stimulus', 'Wait after']
+        self.duration = totaldur
+
+        t = np.arange(0.0, totaldur, 1 / self.params['DAQ', 'Input', 'Sampling frequency']) - \
+               self.params['Stimulus', 'Wait before']
+
+        if stim['End frequency'] == stim['Start frequency']:
+            # exponential sweep blows up if the frequencies are equal
+            sweeptype = 'Linear'
+        else:
+            sweeptype = stim['Frequency change']
+
+        if sweeptype == 'Exponential':
+            lnk = 1/dur * (np.log(stim['End frequency']) - np.log(stim['Start frequency']))
+
+            f = stim['Start frequency'] * np.exp(t * lnk)
+            f[t < 0] = np.nan
+            f[t > dur] = np.nan
+
+            phase = 2*np.pi*stim['Start frequency'] * (np.exp(t * lnk) - 1)/lnk
+
+            phase[t < 0] = np.nan
+            phase[t > dur] = np.nan
+
+            logging.debug('stim children: {}'.format(stim.children()))
+            a0 = stim['Start frequency'] ** stim['Frequency exponent']
+            pos = stim['Amplitude']/a0 * (np.power(f, stim['Frequency exponent'])) * np.sin(phase)
+            vel = stim['Amplitude']/a0 * np.exp(stim['Frequency exponent']*t*lnk) * lnk * \
+                  (stim['Frequency exponent'] * np.sin(phase) +
+                   2*np.pi/lnk * f * np.cos(phase))
+
+        elif sweeptype == 'Linear':
+            k = (stim['End frequency'] - stim['Start frequency']) / dur
+            f = stim['Start frequency'] + k * t
+
+            f[t < 0] = np.nan
+            f[t > stim['Cycles'] / stim['Frequency']] = np.nan
+
+            phase = 2*np.pi*(stim['Start frequency']*t + k/2 * np.power(t, 2))
+
+            b = stim['Frequency exponent']
+            a0 = stim['Start frequency'] ** b
+            pos = stim['Amplitude']/a0 * np.power(f, b) * np.sin(phase)
+            vel = stim['Amplitude']/a0 * (b * k * np.power(f, b-1) * np.sin(phase) +
+                                          2*np.pi * np.power(f, b+1) * np.cos(phase))
+        else:
+            raise ValueError("Unrecognized frequency sweep type: {}".format(stim['Frequency change']))
+
+        pos[t < 0] = 0
+        pos[t > dur] = 0
+
+        vel[t < 0] = 0
+        vel[t > dur] = 0
+
+        phase[t < 0] = 0
+        phase[t > dur] = 0
+
+        if self.params['Stimulus', 'Wait after'] > 0.5:
+            isramp = np.logical_and(t >= dur, t < dur+0.5)
+            k = int((self.params['Stimulus', 'Wait before'] + dur) * self.params['DAQ', 'Input', 'Sampling frequency'])
+        else:
+            isramp = t >= totaldur - 0.5
+            k = int((totaldur - 0.5) * self.params['DAQ', 'Input', 'Sampling frequency'])
+
+        pend = pos[k]
+        velend = (0 - pend) / 0.5
+
+        ramp = pend + (t[isramp] - t[k])*velend
+
+        np.place(vel, isramp, velend)
+        np.place(vel, isramp, ramp)
+
+        # self.digital_out_data = self.make_motor_pulses(tout, vel)
+
+        self.t = t
+        self.pos = pos
+        self.vel = vel
+
+        self.Lact = np.zeros_like(self.t)
+        self.Ract = np.zeros_like(self.t)
+        self.analog_out_data = np.row_stack((self.Lact, self.Ract))
+
+        self.Lonoff = np.array([])
+        self.Ronoff = np.array([])
+
     def make_motor_pulses(self, t, vel):
+        # TODO: upsample data to output rate
         velfrac = vel / (self.output.motorMaxSpeed / 60 * 360)
         if np.any(np.abs(velfrac) > 1):
             raise ValueError('Motion is too fast!')
@@ -242,6 +355,7 @@ stimParameterDefs = {
         {'name': 'Frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
         {'name': 'Cycles', 'type': 'int', 'value': 10},
         {'name': 'Activation', 'type': 'group', 'children': [
+            {'name': 'On', 'type': 'bool', 'value': True},
             {'name': 'Start cycle', 'type': 'int', 'value': 3},
             {'name': 'Phase', 'type': 'float', 'value': 0.0, 'step': 10.0, 'suffix': '%'},
             {'name': 'Duty', 'type': 'float', 'value': 30.0, 'step': 10.0, 'suffix': '%'},
@@ -253,8 +367,8 @@ stimParameterDefs = {
         ]}
     ],
     'Frequency Sweep': [
-        {'name': 'Start Frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
-        {'name': 'End Frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
+        {'name': 'Start frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
+        {'name': 'End frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
         {'name': 'Frequency change', 'type': 'list', 'values': ['Exponential','Linear'], 'value': 'Exponential'},
         {'name': 'Duration', 'type': 'float', 'value': 300.0, 'suffix': 'sec'},
         {'name': 'Amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'deg'},
@@ -327,13 +441,14 @@ class BenderWindow(QtGui.QMainWindow):
 
         stimtype = self.params.child('Stimulus', 'Type')
         self.curStimType = stimtype.value()
-        stimtype.sigValueChanged.connect(self.changeStimType)
-
-        self.params.child('Stimulus').sigTreeStateChanged.connect(self.generateStimulus)
+        self.connectParameterSlots()
 
         self.stimParamState = dict()
 
         self.ui.browseOutputPathButton.clicked.connect(self.browseOutputPath)
+        self.ui.fileNamePatternEdit.editingFinished.connect(self.updateFileName)
+        self.ui.curFileNumberBox.valueChanged.connect(self.updateFileName)
+        self.ui.restartNumberingButton.clicked.connect(self.restartNumbering)
 
         self.ui.saveParametersButton.clicked.connect(self.saveParams)
         self.ui.loadParametersButton.clicked.connect(self.loadParams)
@@ -348,6 +463,17 @@ class BenderWindow(QtGui.QMainWindow):
         ui.setupUi(self)
         self.ui = ui
 
+    def connectParameterSlots(self):
+        self.params.child('Stimulus', 'Type').sigValueChanged.connect(self.changeStimType)
+        self.params.child('Stimulus').sigTreeStateChanged.connect(self.generateStimulus)
+
+    def disconnectParameterSlots(self):
+        try:
+            self.params.child('Stimulus', 'Type').sigValueChanged.disconnect(self.changeStimType)
+            self.params.child('Stimulus').sigTreeStateChanged.disconnect(self.generateStimulus)
+        except TypeError:
+            pass
+
     def browseOutputPath(self):
         outputPath = QtGui.QFileDialog.getExistingDirectory(self, "Choose output directory")
         if outputPath:
@@ -356,18 +482,92 @@ class BenderWindow(QtGui.QMainWindow):
     def changeStimType(self, param, value):
         stimParamGroup = self.params.child('Stimulus', 'Parameters')
         self.stimParamState[self.curStimType] = stimParamGroup.saveState()
-        if value in self.stimParamState:
-            stimParamGroup.restoreState(self.stimParamState[value])
-        else:
-            stimParamGroup.clearChildren()
-            stimParamGroup.addChildren(stimParameterDefs[value])
+        try:
+            self.disconnectParameterSlots()
+
+            if value in self.stimParamState:
+                stimParamGroup.restoreState(self.stimParamState[value], blockSignals=True)
+            else:
+                stimParamGroup.clearChildren()
+                stimParamGroup.addChildren(stimParameterDefs[value])
+        finally:
+            self.connectParameterSlots()
         self.curStimType = value
+        self.generateStimulus()
 
     def generateStimulus(self):
         self.bender = BenderDAQ(self.params)
         self.bender.make_stimulus()
 
-        self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos, clear=True)
+        if self.bender.t is not None:
+            self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos, clear=True)
+            Lbrush = pg.mkBrush(pg.hsvColor(0.0, sat=0.4, alpha=0.3))
+            Rbrush = pg.mkBrush(pg.hsvColor(0.5, sat=0.4, alpha=0.3))
+            for onoff in self.bender.Lonoff:
+                self.ui.plot1Widget.addItem(pg.LinearRegionItem(onoff, movable=False, brush=Lbrush))
+
+            for onoff in self.bender.Ronoff:
+                self.ui.plot1Widget.addItem(pg.LinearRegionItem(onoff, movable=False, brush=Rbrush))
+
+            self.updateFileName()
+
+    def updateFileName(self):
+        pattern = self.ui.fileNamePatternEdit.text()
+        filename = self.getFileName(pattern)
+        self.ui.fileNameLabel.setText(filename)
+
+    def restartNumbering(self):
+        self.ui.curFileNumberBox.setValue(1)
+
+    def getFileName(self, filepattern):
+        stim = self.params.child('Stimulus', 'Parameters')
+
+        class SafeDict(dict):
+            def __missing__(self, key):
+                return '{' + key + '}'
+
+        logging.debug('Stimulus/Type = {}'.format(self.params['Stimulus', 'Type']))
+        stimtype = str(self.params['Stimulus', 'Type'])
+        if stimtype == 'Sine':
+            data = SafeDict({'tp': 'sin',
+                             'f': stim['Frequency'],
+                             'a': stim['Amplitude'],
+                             'ph': stim['Activation', 'Phase'],
+                             'lv': stim['Activation', 'Left voltage'],
+                             'rv': stim['Activation', 'Right voltage'],
+                             'num': self.ui.curFileNumberBox.value()})
+
+            if not stim['Activation', 'On']:
+                data['lv'] = 0
+                data['rv'] = 0
+        elif stimtype == 'Frequency Sweep':
+            data = SafeDict({'tp': 'freqsweep',
+                             'a': stim['Amplitude'],
+                             'f0': stim['Start frequency'],
+                             'f1': stim['End frequency']})
+        else:
+            assert False
+
+        # default formats for the different types
+        fmt = {'f': '.2f',
+               'a': '.0f',
+               'ph': '02.0f',
+               'lv': '.0f',
+               'rv': '.0f',
+               'f0': '.1f',
+               'f1': '.1f',
+               'num': '03d'}
+
+        filepattern = str(filepattern)
+        for key1, fmt1 in fmt.iteritems():
+            if key1 in data:
+                filepattern = filepattern.replace('{'+key1+'}', '{'+key1+':'+fmt1+'}')
+
+        filename = string.Formatter().vformat(filepattern, (), data)
+
+        filename = filename.replace('.', '_')
+
+        return filename
 
     def saveParams(self):
         paramFile = QtGui.QFileDialog.getSaveFileName(self, "Choose parameter file", filter="INI files (.ini)")
@@ -397,9 +597,36 @@ class BenderWindow(QtGui.QMainWindow):
 
         settings.endGroup()
 
-        settings.beginGroup("ParameterTree")
-        self.readParameters(settings, self.params)
+        settings.beginGroup("File")
+        self.ui.outputPathEdit.setText(settings.value("OutputPath").toString())
+        self.ui.fileNamePatternEdit.setText(settings.value("FileNamePattern").toString())
+        v, ok = settings.value("CurrentFileNumber").toInt()
+        if ok:
+            self.ui.curFileNumberBox.setValue(v)
         settings.endGroup()
+
+        settings.beginGroup("ParameterTree")
+
+        try:
+            self.disconnectParameterSlots()
+
+            stimtype = str(settings.value("Stimulus/Type").toString())
+            if stimtype in stimParameterDefs:
+                stimParamGroup = self.params.child('Stimulus', 'Parameters')
+                stimParamGroup.clearChildren()
+                stimParamGroup.addChildren(stimParameterDefs[stimtype])
+            else:
+                assert False
+            self.curStimType = stimtype
+
+            self.readParameters(settings, self.params)
+        finally:
+            self.connectParameterSlots()
+
+        settings.endGroup()
+
+        self.generateStimulus()
+        self.updateFileName()
 
     def writeSettings(self):
         settings = QtCore.QSettings(SETTINGS_FILE, QtCore.QSettings.IniFormat)
@@ -413,6 +640,12 @@ class BenderWindow(QtGui.QMainWindow):
         settings.setValue("plotSplitter", self.ui.plotSplitter.saveState())
         settings.endGroup()
 
+        settings.beginGroup("File")
+        settings.setValue("OutputPath", self.ui.outputPathEdit.text())
+        settings.setValue("FileNamePattern", self.ui.fileNamePatternEdit.text())
+        settings.setValue("CurrentFileNumber", self.ui.curFileNumberBox.value())
+        settings.endGroup()
+
         settings.beginGroup("ParameterTree")
         self.writeParameters(settings, self.params)
         settings.endGroup()
@@ -421,6 +654,7 @@ class BenderWindow(QtGui.QMainWindow):
         for ch in params:
             if ch.hasChildren():
                 settings.beginGroup(ch.name())
+                settings.setValue("Expanded", ch.opts['expanded'])
                 self.writeParameters(settings, ch)
                 settings.endGroup()
             elif ch.type() in ['float', 'int', 'list', 'str']:
@@ -430,6 +664,9 @@ class BenderWindow(QtGui.QMainWindow):
         for ch in params:
             if ch.hasChildren():
                 settings.beginGroup(ch.name())
+                expanded = settings.value("Expanded").toBool()
+                ch.setOpts(expanded=expanded)
+
                 self.readParameters(settings, ch)
                 settings.endGroup()
             else:
