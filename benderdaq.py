@@ -128,6 +128,7 @@ class BenderDAQ(QtCore.QObject):
         self.t = t
         self.pos = pos
         self.vel = vel
+        self.phase = phase
         self.duration = dur
 
         self.tout = tout
@@ -229,6 +230,7 @@ class BenderDAQ(QtCore.QObject):
         self.t = t
         self.pos = pos
         self.vel = vel
+        self.phase = phase
         self.duration = totaldur
 
         self.tout = tout
@@ -375,10 +377,10 @@ class BenderDAQ(QtCore.QObject):
         self.updateNum = 0
 
         # allocate input buffers
-        self.t_buffer = np.split(self.t, self.nupdates)
+        self.t_buffer = np.reshape(self.t, (self.nupdates, -1))
 
-        self.analog_in_data = np.zeros((6, self.ninsamps, self.nupdates), dtype=np.float64)
-        self.encoder_in_data = np.zeros((self.ninsamps, self.nupdates), dtype=np.float64)
+        self.analog_in_data = np.zeros((self.nupdates, self.ninsamps, 6), dtype=np.float64)
+        self.encoder_in_data = np.zeros((self.nupdates, self.ninsamps), dtype=np.float64)
         self.analog_in_buffer = np.zeros((6, self.ninsamps), dtype=np.float64)
         self.encoder_in_buffer = np.zeros((self.ninsamps,), dtype=np.float64)
 
@@ -405,10 +407,10 @@ class BenderDAQ(QtCore.QObject):
                                          daq.DAQmx_Val_GroupByChannel,
                                          self.analog_in_buffer, self.analog_in_buffer.size,
                                          daq.byref(aibytesread), None)
-            self.analog_in_data[:, :, self.updateNum] = self.analog_in_buffer
+            self.analog_in_data[self.updateNum, :, :] = self.analog_in_buffer.T
             self.encoder_in.ReadCounterF64(self.ninsamps, interval*0.1, self.encoder_in_buffer,
                                            self.encoder_in_buffer.size, daq.byref(encbytesread), None)
-            self.encoder_in_data[:, self.updateNum] = self.encoder_in_buffer
+            self.encoder_in_data[self.updateNum, :] = self.encoder_in_buffer
 
             if self.updateNum+2 < self.nupdates:
                 logging.debug('%d: max = %f' % (self.updateNum, np.max(self.analog_out_buffers[self.updateNum+2])))
@@ -421,7 +423,8 @@ class BenderDAQ(QtCore.QObject):
                                                 self.digital_out_buffers[self.updateNum+2],
                                                 daq.byref(dobyteswritten), None)
 
-            self.sigUpdate.emit(self.t_buffer[self.updateNum], self.analog_in_buffer, self.encoder_in_buffer)
+            self.sigUpdate.emit(self.t_buffer[0:self.updateNum+1, :], self.analog_in_data[0:self.updateNum+1, :, :],
+                                self.encoder_in_data[0:self.updateNum+1, :])
 
             logging.debug('Read %d ai, %d enc' % (aibytesread.value, encbytesread.value))
             logging.debug('Wrote %d ao, %d dig' % (aobyteswritten.value, dobyteswritten.value))
@@ -435,6 +438,7 @@ class BenderDAQ(QtCore.QObject):
 
             logging.debug('Stopping')
             self.timer.stop()
+            self.timer.timeout.disconnect(self.update)
 
             self.analog_in_data = np.reshape(self.analog_in_data, (6, -1))
             self.encoder_in_data = np.reshape(self.encoder_in_data, (-1,))
@@ -445,3 +449,23 @@ class BenderDAQ(QtCore.QObject):
             del self.digital_out
 
             self.sigDoneAcquiring.emit()
+
+    def abort(self):
+        logging.debug('Aborting')
+        self.timer.stop()
+        self.timer.timeout.disconnect(self.update)
+
+        self.analog_out.StopTask()
+        self.digital_out.StopTask()
+        self.analog_in.StopTask()
+        self.encoder_in.StopTask()
+
+        self.analog_in_data = np.reshape(self.analog_in_data, (6, -1))
+        self.encoder_in_data = np.reshape(self.encoder_in_data, (-1,))
+
+        del self.analog_in
+        del self.encoder_in
+        del self.analog_out
+        del self.digital_out
+
+        self.sigDoneAcquiring.emit()

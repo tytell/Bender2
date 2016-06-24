@@ -17,11 +17,6 @@ from bender_ui import Ui_BenderWindow
 
 from benderdaq import BenderDAQ
 
-try:
-    import PyDAQmx as daq
-except ImportError:
-    pass
-
 from settings import SETTINGS_FILE
 
 pg.setConfigOption('background', 'w')
@@ -137,6 +132,8 @@ class BenderWindow(QtGui.QMainWindow):
 
         self.bender = BenderDAQ()
         self.bender.sigUpdate.connect(self.updatePlot)
+        self.bender.sigDoneAcquiring.connect(self.endAcquisition)
+
         self.ui.goButton.clicked.connect(self.startAcquisition)
 
         self.readSettings()
@@ -149,18 +146,27 @@ class BenderWindow(QtGui.QMainWindow):
     def connectParameterSlots(self):
         self.params.child('Stimulus', 'Type').sigValueChanged.connect(self.changeStimType)
         self.params.child('Stimulus').sigTreeStateChanged.connect(self.generateStimulus)
+        self.params.child('DAQ', 'Update rate').sigValueChanged.connect(self.generateStimulus)
         self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.connect(self.updateOutputFrequency)
+        self.params.child('Motor parameters').sigTreeStateChanged.connect(self.generateStimulus)
 
     def disconnectParameterSlots(self):
         try:
             self.params.child('Stimulus', 'Type').sigValueChanged.disconnect(self.changeStimType)
             self.params.child('Stimulus').sigTreeStateChanged.disconnect(self.generateStimulus)
+            self.params.child('DAQ', 'Update rate').sigValueChanged.disconnect(self.generateStimulus)
             self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.disconnect(
                 self.updateOutputFrequency)
+            self.params.child('Motor parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
         except TypeError:
+            logging.warning('Problem disconnecting parameter slots')
             pass
 
     def startAcquisition(self):
+        self.ui.goButton.setText('Abort')
+        self.ui.goButton.clicked.disconnect(self.startAcquisition)
+        self.ui.goButton.clicked.connect(self.bender.abort)
+
         self.encoderPlot = self.ui.plot1Widget.plot(pen='k')
         self.TxPlot = self.ui.plot2Widget.plot(pen='k', clear=True)
         self.tacq = np.empty((0,))
@@ -175,12 +181,17 @@ class BenderWindow(QtGui.QMainWindow):
 
     def updatePlot(self, t, aidata, encdata):
         logging.debug('updatePlot')
-        self.tacq = np.append(self.tacq, t)
-        self.encoderData = np.append(self.encoderData, encdata)
-        self.aiData = np.append(self.aiData, aidata, axis=1)
+        t = t.flatten()
+        encdata = encdata.flatten()
+        aidata = aidata.reshape((len(t), -1))
 
-        self.encoderPlot.setData(x=self.tacq, y=self.encoderData)
-        self.TxPlot.setData(x=self.tacq, y=self.aiData[4,:])
+        self.encoderPlot.setData(x=t, y=encdata)
+        self.TxPlot.setData(x=t, y=aidata[:,4])
+
+    def endAcquisition(self):
+        self.ui.goButton.setText('Go')
+        self.ui.goButton.clicked.disconnect(self.bender.abort)
+        self.ui.goButton.clicked.connect(self.startAcquisition)
 
     def browseOutputPath(self):
         outputPath = QtGui.QFileDialog.getExistingDirectory(self, "Choose output directory")
