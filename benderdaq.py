@@ -6,6 +6,8 @@ import logging
 import numpy as np
 from scipy import integrate, interpolate
 
+from PyQt4 import QtCore
+
 try:
     import PyDAQmx as daq
 except ImportError:
@@ -282,10 +284,10 @@ class BenderDAQ(object):
         self.analog_in.CreateAIVoltageChan(inputParams['zTorque'], 'Tz', daq.DAQmx_Val_Cfg_Default,
                                            -10, 10, daq.DAQmx_Val_Volts, None)
 
-        ninsamps = int(1.0/self.params['DAQ', 'Update rate'] * inputParams['Sampling frequency'])
-        inputbufferlen = 2*ninsamps
+        self.ninsamps = int(1.0/self.params['DAQ', 'Update rate'] * inputParams['Sampling frequency'])
+        self.inputbufferlen = 2*self.ninsamps
         self.analog_in.CfgSampClkTiming("", inputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
-                                        daq.DAQmx_Val_ContSamps, inputbufferlen)
+                                        daq.DAQmx_Val_ContSamps, self.inputbufferlen)
 
         # encoder input
         self.encoder_in = daq.Task()
@@ -296,17 +298,27 @@ class BenderDAQ(object):
                                                daq.DAQmx_Val_Degrees,
                                                inputParams['Counts per revolution'], 0, None)
         self.encoder_in.CfgSampClkTiming("ai/SampleClock", inputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
-                                         daq.DAQmx_Val_ContSamps, inputbufferlen)
+                                         daq.DAQmx_Val_ContSamps, self.inputbufferlen)
 
-        noutsamps = int(1.0/self.params['DAQ', 'Update rate'] * outputParams['Sampling frequency'])
-        outputbufferlen = 2*ninsamps
+        self.noutsamps = int(1.0/self.params['DAQ', 'Update rate'] * outputParams['Sampling frequency'])
+        self.outputbufferlen = 2*self.noutsamps
 
         # split the output data into blocks of noutsamps
-        nupdates = int(np.ceil(float(self.analog_out_data.shape[1]) / noutsamps))
-        assert(self.analog_out_data.shape[1] == noutsamps*nupdates)
+        self.nupdates = int(np.ceil(float(self.analog_out_data.shape[1]) / self.noutsamps))
+        assert(self.analog_out_data.shape[1] == self.noutsamps*self.nupdates)
 
-        self.analog_out_data = np.reshape(self.analog_out_data, (-1, noutsamps, nupdates))
-        self.digital_out_data = np.reshape(self.digital_out_data, (noutsamps, nupdates))
+        self.analog_out_buffers = []
+        self.digital_out_buffers = []
+        for i in range(self.nupdates):
+            aobuf = np.zeros((self.analog_out_data.shape[0], self.noutsamps))
+            aobuf[:, :] = self.analog_out_data[:, i*self.noutsamps + np.arange(self.noutsamps)]
+            assert(aobuf.flags.c_contiguous)
+            self.analog_out_buffers.append(aobuf)
+
+            dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
+            dobuf[:] = self.digital_out_data[i * self.noutsamps + np.arange(self.noutsamps)]
+            assert (dobuf.flags.c_contiguous)
+            self.digital_out_buffers.append(dobuf)
 
         # analog output (stimulus)
         self.analog_out = daq.Task()
@@ -319,19 +331,17 @@ class BenderDAQ(object):
 
         # set the output sample frequency and number of samples to acquire
         self.analog_out.CfgSampClkTiming("", outputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
-                                         daq.DAQmx_Val_ContSamps, outputbufferlen)
+                                         daq.DAQmx_Val_ContSamps, self.outputbufferlen)
         # make sure the output starts at the same time as the input
         self.analog_out.CfgDigEdgeStartTrig("ai/StartTrigger", daq.DAQmx_Val_Rising)
 
         # write the output data
-        self.analog_out.WriteAnalogF64(self.analog_out_data.shape[1], False, 10,
+        self.analog_out.WriteAnalogF64(self.outputbufferlen, False, 10,
                                        daq.DAQmx_Val_GroupByChannel,
-                                       self.analog_out_data, daq.byref(aobyteswritten), None)
+                                       np.column_stack(tuple(self.analog_out_buffers[0:2])),
+                                       daq.byref(aobyteswritten), None)
 
         logging.debug('%d analog bytes written' % aobyteswritten.value)
-
-        if aobyteswritten.value != self.analog_out_data.shape[1]:
-            raise IOError('Problem with writing output data')
 
         # digital output (motor)
         self.digital_out = daq.Task()
@@ -342,44 +352,86 @@ class BenderDAQ(object):
         self.digital_out.CfgSampClkTiming("ao/SampleClock", outputParams['Sampling frequency'],
                                           daq.DAQmx_Val_Rising,
                                           daq.DAQmx_Val_ContSamps,
-                                          len(self.digital_out_data))
+                                          self.outputbufferlen)
 
         # write the digital data
-        self.digital_out.WriteDigitalU8(len(self.digital_out_data), False, 10,
+        self.digital_out.WriteDigitalU8(self.outputbufferlen, False, 10,
                                         daq.DAQmx_Val_GroupByChannel,
-                                        self.digital_out_data, daq.byref(dobyteswritten), None)
+                                        np.concatenate(tuple(self.digital_out_buffers[0:2])),
+                                        daq.byref(dobyteswritten), None)
 
         logging.debug('%d digital bytes written' % dobyteswritten.value)
-        if dobyteswritten.value != len(self.digital_out_data):
-            raise IOError('Problem with writing digital data')
 
     def start(self):
         self.setup_channels()
+
+        self.timer = QtCore.QTimer()
+        self.timer.timeout.connect(self.update)
+
+        self.updateNum = 0
+
+        # allocate input buffers
+        self.analog_in_data = np.zeros((6, self.ninsamps, self.nupdates), dtype=np.float64)
+        self.encoder_in_data = np.zeros((self.ninsamps, self.nupdates), dtype=np.float64)
+        self.analog_in_buffer = np.zeros((6, self.ninsamps), dtype=np.float64)
+        self.encoder_in_buffer = np.zeros((self.ninsamps,), dtype=np.float64)
 
         # start the digital and analog output tasks.  They won't
         # do anything until the analog input starts
         self.digital_out.StartTask()
         self.analog_out.StartTask()
         self.encoder_in.StartTask()
+        self.analog_in.StartTask()
 
-        nsamps = int(self.duration * self.params['DAQ', 'Input', 'Sampling frequency'])
+        self.timer.start(int(1000.0 / self.params['DAQ', 'Update rate']))
 
-        self.analog_in_data = np.zeros((6, nsamps), dtype=np.float64)
-        aibytesread = daq.int32()
+    def update(self):
+        if self.updateNum < self.nupdates:
+            aibytesread = daq.int32()
+            encbytesread = daq.int32()
+            aobyteswritten = daq.int32()
+            dobyteswritten = daq.int32()
 
-        self.encoder_in_data = np.zeros((nsamps,), dtype=np.float64)
-        encbytesread = daq.int32()
+            interval = 1.0 / self.params['DAQ', 'Update rate']
 
-        # read the input data
-        self.analog_in.ReadAnalogF64(self.analog_in_data.shape[1], self.duration + 10.0,
-                                     daq.DAQmx_Val_GroupByChannel,
-                                     self.analog_in_data, self.analog_in_data.size, daq.byref(aibytesread), None)
-        self.encoder_in.ReadCounterF64(len(self.encoder_in_data), self.duration + 10.0, self.encoder_in_data,
-                                       self.encoder_in_data.size, daq.byref(encbytesread), None)
+            # read the input data
+            self.analog_in.ReadAnalogF64(self.ninsamps, interval*0.1,
+                                         daq.DAQmx_Val_GroupByChannel,
+                                         self.analog_in_buffer, self.analog_in_buffer.size,
+                                         daq.byref(aibytesread), None)
+            self.analog_in_data[:, :, self.updateNum] = self.analog_in_buffer
+            self.encoder_in.ReadCounterF64(self.ninsamps, interval*0.1, self.encoder_in_buffer,
+                                           self.encoder_in_buffer.size, daq.byref(encbytesread), None)
+            self.encoder_in_data[:, self.updateNum] = self.encoder_in_buffer
 
-        self.analog_in_data = self.analog_in_data.T
+            if self.updateNum+2 < self.nupdates:
+                logging.debug('%d: max = %f' % (self.updateNum, np.max(self.analog_out_buffers[self.updateNum+2])))
+                self.analog_out.WriteAnalogF64(self.noutsamps, False, 10,
+                                               daq.DAQmx_Val_GroupByChannel,
+                                               self.analog_out_buffers[self.updateNum+2],
+                                               daq.byref(aobyteswritten), None)
+                self.digital_out.WriteDigitalU8(self.noutsamps, False, 10,
+                                                daq.DAQmx_Val_GroupByChannel,
+                                                self.digital_out_buffers[self.updateNum+2],
+                                                daq.byref(dobyteswritten), None)
 
-        del self.analog_in
-        del self.encoder_in
-        del self.analog_out
-        del self.digital_out
+            logging.debug('Read %d ai, %d enc' % (aibytesread.value, encbytesread.value))
+            logging.debug('Wrote %d ao, %d dig' % (aobyteswritten.value, dobyteswritten.value))
+
+            self.updateNum += 1
+        else:
+            self.analog_out.StopTask()
+            self.digital_out.StopTask()
+            self.analog_in.StopTask()
+            self.encoder_in.StopTask()
+
+            logging.debug('Stopping')
+            self.timer.stop()
+
+            self.analog_in_data = np.reshape(self.analog_in_data, (6, -1))
+            self.encoder_in_data = np.reshape(self.encoder_in_data, (-1,))
+
+            del self.analog_in
+            del self.encoder_in
+            del self.analog_out
+            del self.digital_out

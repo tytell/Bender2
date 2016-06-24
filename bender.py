@@ -162,9 +162,9 @@ class BenderWindow(QtGui.QMainWindow):
     def startAcquisition(self):
         self.bender.start()
 
-        self.ui.plot2Widget.plot(x=self.bender.t[0:len(self.bender.encoder_in_data)],
-                                 y=self.bender.encoder_in_data, clear=True, pen='r')
-        self.ui.plot2Widget.setXLink(self.ui.plot1Widget)
+        # self.ui.plot2Widget.plot(x=self.bender.t[0:len(self.bender.encoder_in_data)],
+        #                          y=self.bender.encoder_in_data, clear=True, pen='r')
+        # self.ui.plot2Widget.setXLink(self.ui.plot1Widget)
 
     def browseOutputPath(self):
         outputPath = QtGui.QFileDialog.getExistingDirectory(self, "Choose output directory")
