@@ -15,6 +15,8 @@ import pyqtgraph as pg
 
 from bender_ui import Ui_BenderWindow
 
+from benderdaq import BenderDAQ
+
 try:
     import PyDAQmx as daq
 except ImportError:
@@ -24,329 +26,6 @@ from settings import SETTINGS_FILE
 
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
-
-
-class BenderDAQ(object):
-    def __init__(self, parameters):
-        self.params = parameters
-
-        self.t = None
-        self.pos = None
-        self.vel = None
-        self.digital_out = None
-
-    def make_stimulus(self):
-        logging.debug('Stimulus.type = {}'.format(self.params['Stimulus', 'Type']))
-        if self.params['Stimulus', 'Type'] == 'Sine':
-            self.make_sine_stimulus()
-        elif self.params['Stimulus', 'Type'] == 'Frequency Sweep':
-            self.make_freqsweep_stimulus()
-        else:
-            assert False
-
-    def make_sine_stimulus(self):
-        try:
-            _ = self.params['Stimulus', 'Parameters', 'Cycles']
-        except Exception:
-            self.pos = None
-            self.vel = None
-            self.t = None
-            return
-
-        logging.debug('Stimulus.wait before = {}'.format(self.params['Stimulus', 'Wait before']))
-        stim = self.params.child('Stimulus', 'Parameters')
-        dur = self.params['Stimulus', 'Wait before'] + stim['Cycles'] / stim['Frequency'] + \
-              self.params['Stimulus', 'Wait after']
-        self.duration = dur
-
-        t = np.arange(0.0, dur, 1 / self.params['DAQ', 'Input', 'Sampling frequency']) - \
-               self.params['Stimulus', 'Wait before']
-
-        pos = stim['Amplitude'] * np.sin(2 * np.pi * stim['Frequency'] * t)
-        pos[t < 0] = 0
-        pos[t > stim['Cycles'] / stim['Frequency']] = 0
-
-        vel = 2.0 * np.pi * stim['Frequency'] * stim['Amplitude'] * \
-              np.sin(2 * np.pi * stim['Frequency'] * t)
-        vel[t < 0] = 0
-        vel[t > stim['Cycles'] / stim['Frequency']] = 0
-
-        phase = t * stim['Frequency']
-        phase[t < 0] = -1
-        phase[t > stim['Cycles'] / stim['Frequency']] = -1
-
-        # self.digital_out_data = self.make_motor_pulses(t, vel)
-
-        # make activation
-        actburstdur = stim['Activation','Duty']/100.0 / stim['Frequency']
-        actburstdur = np.floor(actburstdur * stim['Activation','Pulse rate'] * 2) / (stim['Activation','Pulse rate'] * 2)
-        actburstduty = actburstdur * stim['Frequency']
-
-        actpulsephase = t[np.logical_and(t > 0, t < actburstdur)] * stim['Activation','Pulse rate']
-        burst = (np.mod(actpulsephase, 1) < 0.5).astype(np.float)
-
-        bendphase = phase - 0.25
-        bendphase[phase == -1] = -1
-
-        Lactcmd = np.zeros_like(t)
-        Ractcmd = np.zeros_like(t)
-        Lonoff = []
-        Ronoff = []
-
-        if stim['Activation', 'On']:
-            actphase = stim['Activation', 'Phase'] / 100.0
-            for c in range(int(stim['Activation', 'Start cycle']), int(stim['Cycles'])):
-                tstart = (c - 0.25 + actphase) / stim['Frequency']
-                tend = tstart + actburstdur
-
-                if stim['Activation', 'Left voltage'] != 0:
-                    Lonoff.append([tstart, tend])
-                    np.place(Lactcmd, np.logical_and(bendphase >= c + actphase,
-                                                     bendphase < c + actphase + actburstduty),
-                             burst)
-                if stim['Activation', 'Right voltage'] != 0:
-                    Ronoff.append(np.array([tstart, tend]) + 0.5/stim['Frequency'])
-
-                    np.place(Ractcmd, np.logical_and(bendphase >= c + 0.5 + actphase,
-                                                     bendphase < c + 0.5 + actphase + actburstduty),
-                             burst)
-
-            Lactcmd = Lactcmd * stim['Activation','Left voltage'] / stim['Activation','Left voltage scale']
-            Ractcmd = Ractcmd * stim['Activation','Right voltage'] / stim['Activation','Right voltage scale']
-
-        self.analog_out_data = np.row_stack((Lactcmd, Ractcmd))
-
-        self.t = t
-        self.pos = pos
-        self.vel = vel
-
-        self.Lact = Lactcmd
-        self.Ract = Ractcmd
-        self.Lonoff = np.array(Lonoff)
-        self.Ronoff = np.array(Ronoff)
-
-    def make_freqsweep_stimulus(self):
-        try:
-            _ = self.params['Stimulus', 'Parameters', 'Duration']
-        except Exception:
-            self.pos = None
-            self.vel = None
-            self.t = None
-            return
-
-        stim = self.params.child('Stimulus', 'Parameters')
-
-        dur = stim['Duration']
-
-        totaldur = self.params['Stimulus', 'Wait before'] + stim['Duration'] + \
-                   self.params['Stimulus', 'Wait after']
-        self.duration = totaldur
-
-        t = np.arange(0.0, totaldur, 1 / self.params['DAQ', 'Input', 'Sampling frequency']) - \
-               self.params['Stimulus', 'Wait before']
-
-        if stim['End frequency'] == stim['Start frequency']:
-            # exponential sweep blows up if the frequencies are equal
-            sweeptype = 'Linear'
-        else:
-            sweeptype = stim['Frequency change']
-
-        if sweeptype == 'Exponential':
-            lnk = 1/dur * (np.log(stim['End frequency']) - np.log(stim['Start frequency']))
-
-            f = stim['Start frequency'] * np.exp(t * lnk)
-            f[t < 0] = np.nan
-            f[t > dur] = np.nan
-
-            phase = 2*np.pi*stim['Start frequency'] * (np.exp(t * lnk) - 1)/lnk
-
-            phase[t < 0] = np.nan
-            phase[t > dur] = np.nan
-
-            logging.debug('stim children: {}'.format(stim.children()))
-            a0 = stim['Start frequency'] ** stim['Frequency exponent']
-            pos = stim['Amplitude']/a0 * (np.power(f, stim['Frequency exponent'])) * np.sin(phase)
-            vel = stim['Amplitude']/a0 * np.exp(stim['Frequency exponent']*t*lnk) * lnk * \
-                  (stim['Frequency exponent'] * np.sin(phase) +
-                   2*np.pi/lnk * f * np.cos(phase))
-
-        elif sweeptype == 'Linear':
-            k = (stim['End frequency'] - stim['Start frequency']) / dur
-            f = stim['Start frequency'] + k * t
-
-            f[t < 0] = np.nan
-            f[t > stim['Cycles'] / stim['Frequency']] = np.nan
-
-            phase = 2*np.pi*(stim['Start frequency']*t + k/2 * np.power(t, 2))
-
-            b = stim['Frequency exponent']
-            a0 = stim['Start frequency'] ** b
-            pos = stim['Amplitude']/a0 * np.power(f, b) * np.sin(phase)
-            vel = stim['Amplitude']/a0 * (b * k * np.power(f, b-1) * np.sin(phase) +
-                                          2*np.pi * np.power(f, b+1) * np.cos(phase))
-        else:
-            raise ValueError("Unrecognized frequency sweep type: {}".format(stim['Frequency change']))
-
-        pos[t < 0] = 0
-        pos[t > dur] = 0
-
-        vel[t < 0] = 0
-        vel[t > dur] = 0
-
-        phase[t < 0] = 0
-        phase[t > dur] = 0
-
-        if self.params['Stimulus', 'Wait after'] > 0.5:
-            isramp = np.logical_and(t >= dur, t < dur+0.5)
-            k = int((self.params['Stimulus', 'Wait before'] + dur) * self.params['DAQ', 'Input', 'Sampling frequency'])
-        else:
-            isramp = t >= totaldur - 0.5
-            k = int((totaldur - 0.5) * self.params['DAQ', 'Input', 'Sampling frequency'])
-
-        pend = pos[k]
-        velend = (0 - pend) / 0.5
-
-        ramp = pend + (t[isramp] - t[k])*velend
-
-        np.place(vel, isramp, velend)
-        np.place(vel, isramp, ramp)
-
-        # self.digital_out_data = self.make_motor_pulses(tout, vel)
-
-        self.t = t
-        self.pos = pos
-        self.vel = vel
-
-        self.Lact = np.zeros_like(self.t)
-        self.Ract = np.zeros_like(self.t)
-        self.analog_out_data = np.row_stack((self.Lact, self.Ract))
-
-        self.Lonoff = np.array([])
-        self.Ronoff = np.array([])
-
-    def make_motor_pulses(self, t, vel):
-        # TODO: upsample data to output rate
-        velfrac = vel / (self.output.motorMaxSpeed / 60 * 360)
-        if np.any(np.abs(velfrac) > 1):
-            raise ValueError('Motion is too fast!')
-
-        motorpulserate = np.abs(velfrac) * (self.output.motorMaxFreq - self.output.motorMinFreq) \
-                         + self.output.motorMinFreq
-        motorpulsephase = integrate.cumtrapz(motorpulserate, x=t, initial=self.output.motorMinFreq)
-
-        motorpulses = (np.mod(motorpulsephase, 1) <= 0.5).astype(np.uint8)
-        motordirection = (velfrac <= 0).astype(np.uint8)
-        motorenable = np.ones_like(motordirection)
-        motorenable[-5:] = 0
-
-        dig = np.packbits(np.column_stack((np.zeros((len(motorpulses), 5), dtype=np.uint8),
-                                           motorenable,
-                                           motorpulses,
-                                           motordirection)))
-        return dig
-
-    def setup_channels(self):
-        # analog input
-        self.analog_in = daq.Task()
-
-        self.analog_in.CreateAIVoltageChan(self.input.xForce, 'Fx', daq.DAQmx_Val_Cfg_Default,
-                                           -10, 10, daq.DAQmx_Val_Volts, None)
-        self.analog_in.CreateAIVoltageChan(self.input.yForce, 'Fy', daq.DAQmx_Val_Cfg_Default,
-                                           -10, 10, daq.DAQmx_Val_Volts, None)
-        self.analog_in.CreateAIVoltageChan(self.input.zForce, 'Fz', daq.DAQmx_Val_Cfg_Default,
-                                           -10, 10, daq.DAQmx_Val_Volts, None)
-        self.analog_in.CreateAIVoltageChan(self.input.xTorque, 'Tx', daq.DAQmx_Val_Cfg_Default,
-                                           -10, 10, daq.DAQmx_Val_Volts, None)
-        self.analog_in.CreateAIVoltageChan(self.input.yTorque, 'Ty', daq.DAQmx_Val_Cfg_Default,
-                                           -10, 10, daq.DAQmx_Val_Volts, None)
-        self.analog_in.CreateAIVoltageChan(self.input.zTorque, 'Tz', daq.DAQmx_Val_Cfg_Default,
-                                           -10, 10, daq.DAQmx_Val_Volts, None)
-
-        nsamps = int(self.duration * self.input.frequency)
-        self.analog_in.CfgSampClkTiming("", self.input.frequency, daq.DAQmx_Val_Rising,
-                                        daq.DAQmx_Val_FiniteSamps, nsamps)
-
-        # encoder input
-        self.encoder_in = daq.Task()
-
-        self.encoder_in.CreateCIAngEncoderChan(self.input.encoder, 'encoder',
-                                               daq.DAQmx_Val_X4, False,
-                                               0, daq.DAQmx_Val_AHighBHigh,
-                                               daq.DAQmx_Val_Degrees,
-                                               self.input.encoderCountsPerRev, 0, None)
-        self.encoder_in.CfgSampClkTiming("ai/SampleClock", self.input.frequency, daq.DAQmx_Val_Rising,
-                                         daq.DAQmx_Val_FiniteSamps, nsamps)
-
-        # analog output (stimulus)
-        self.analog_out = daq.Task()
-        aobyteswritten = daq.int32()
-
-        self.analog_out.CreateAOVoltageChan(self.output.leftStim, 'Lstim',
-                                            -10, 10, daq.DAQmx_Val_Volts, None)
-        self.analog_out.CreateAOVoltageChan(self.output.rightStim, 'Rstim',
-                                            -10, 10, daq.DAQmx_Val_Volts, None)
-
-        # set the output sample frequency and number of samples to acquire
-        self.analog_out.CfgSampClkTiming("", self.output.frequency, daq.DAQmx_Val_Rising,
-                                         daq.DAQmx_Val_FiniteSamps, self.analog_out_data.shape[1])
-        # make sure the output starts at the same time as the input
-        self.analog_out.CfgDigEdgeStartTrig("ai/StartTrigger", daq.DAQmx_Val_Rising)
-
-        # write the output data
-        self.analog_out.WriteAnalogF64(self.analog_out_data.shape[1], False, 10,
-                                       daq.DAQmx_Val_GroupByChannel,
-                                       self.analog_out_data, daq.byref(aobyteswritten), None)
-
-        if aobyteswritten.value != self.analog_out_data.shape[1]:
-            raise IOError('Problem with writing output data')
-
-        # digital output (motor)
-        self.digital_out = daq.Task()
-        dobyteswritten = daq.int32()
-
-        self.digital_out.CreateDOChan(self.output.digitalPort, '', daq.DAQmx_Val_ChanForAllLines)
-        # use the analog output clock for digital output
-        self.digital_out.CfgSampClkTiming("ao/SampleClock", self.output.frequency,
-                                          daq.DAQmx_Val_Rising,
-                                          daq.DAQmx_Val_FiniteSamps,
-                                          len(self.digital_out_data))
-
-        # write the digital data
-        self.digital_out.WriteDigitalU8(len(self.digital_out_data), False, 10,
-                                        daq.DAQmx_Val_GroupByChannel,
-                                        self.digital_out_data, daq.byref(dobyteswritten), None)
-
-        if dobyteswritten.value != len(self.digital_out_data):
-            raise IOError('Problem with writing digital data')
-
-    def start(self):
-        # start the digital and analog output tasks.  They won't
-        # do anything until the analog input starts
-        self.digital_out.StartTask()
-        self.analog_out.StartTask()
-        self.encoder_in.StartTask()
-
-        nsamps = int(self.duration * self.input.frequency)
-
-        self.analog_in_data = np.zeros((6, nsamps), dtype=np.float64)
-        aibytesread = daq.int32()
-
-        self.encoder_in_data = np.zeros((nsamps,), dtype=np.float64)
-        encbytesread = daq.int32()
-
-        # read the input data
-        self.analog_in.ReadAnalogF64(self.analog_in_data.shape[1], self.duration + 10.0,
-                                     daq.DAQmx_Val_GroupByChannel,
-                                     self.analog_in_data, self.analog_in_data.size, daq.byref(aibytesread), None)
-        self.encoder_in.ReadCounterF64(len(self.encoder_in_data), self.duration + 10.0, self.encoder_in_data,
-                                       self.encoder_in_data.size, daq.byref(encbytesread), None)
-
-        self.analog_in_data = self.analog_in_data.T
-
-        del self.analog_in
-        del self.encoder_in
-        del self.analog_out
-        del self.digital_out
 
 
 stimParameterDefs = {
@@ -392,19 +71,20 @@ parameterDefinitions = [
             {'name': 'Counts per revolution', 'type': 'int', 'value': 10000, 'limits': (1, 100000)}
         ]},
         {'name': 'Output', 'type': 'group', 'children': [
-            {'name': 'Sampling frequency', 'type': 'float', 'value': 100000.0, 'step': 1000.0, 'siPrefix': True,
-             'suffix': 'Hz'},
+            {'name': 'Sampling frequency', 'type': 'float', 'value': 10000.0, 'step': 1000.0, 'siPrefix': True,
+             'suffix': 'Hz', 'readonly': True},
             {'name': 'Left stimulus', 'type': 'str', 'value': 'Dev1/ao0'},
             {'name': 'Right stimulus', 'type': 'str', 'value': 'Dev1/ao1'},
             {'name': 'Digital port', 'type': 'str', 'value': 'Dev1/port0'}
         ]},
-        {'name': 'Motor parameters', 'type': 'group', 'children': [
-            {'name': 'Maximum speed', 'type': 'float', 'value': 400.0, 'step': 50.0, 'suffix': 'RPM'},
-            {'name': 'Minumum pulse frequency', 'type': 'float', 'value': 1000.0, 'step': 100.0, 'siPrefix': True,
-             'suffix': 'Hz'},
-            {'name': 'Maximum pulse frequency', 'type': 'float', 'value': 5000.0, 'step': 100.0, 'siPrefix': True,
-             'suffix': 'Hz'},
-        ]}
+        {'name': 'Update rate', 'type': 'float', 'value': 10.0, 'suffix': 'Hz'}
+    ]},
+    {'name': 'Motor parameters', 'type': 'group', 'children': [
+        {'name': 'Maximum speed', 'type': 'float', 'value': 400.0, 'step': 50.0, 'suffix': 'RPM'},
+        {'name': 'Minimum pulse frequency', 'type': 'float', 'value': 1000.0, 'step': 100.0, 'siPrefix': True,
+         'suffix': 'Hz'},
+        {'name': 'Maximum pulse frequency', 'type': 'float', 'value': 5000.0, 'step': 100.0, 'siPrefix': True,
+         'suffix': 'Hz'},
     ]},
     {'name': 'Geometry', 'type': 'group', 'children': [
         {'name': 'doutvert', 'tip': 'Vertical distance from transducer to center of pressure', 'type': 'float',
@@ -428,11 +108,10 @@ parameterDefinitions = [
     ]}
 ]
 
+
 class BenderWindow(QtGui.QMainWindow):
     def __init__(self):
         super(BenderWindow, self).__init__()
-
-        settings = QtCore.QSettings(SETTINGS_FILE, QtCore.QSettings.IniFormat)
 
         self.initUI()
 
@@ -456,6 +135,9 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.plot1Widget.setLabel('left', "Angle", units='deg')
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
 
+        self.bender = BenderDAQ()
+        self.ui.goButton.clicked.connect(self.startAcquisition)
+
         self.readSettings()
 
     def initUI(self):
@@ -466,13 +148,23 @@ class BenderWindow(QtGui.QMainWindow):
     def connectParameterSlots(self):
         self.params.child('Stimulus', 'Type').sigValueChanged.connect(self.changeStimType)
         self.params.child('Stimulus').sigTreeStateChanged.connect(self.generateStimulus)
+        self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.connect(self.updateOutputFrequency)
 
     def disconnectParameterSlots(self):
         try:
             self.params.child('Stimulus', 'Type').sigValueChanged.disconnect(self.changeStimType)
             self.params.child('Stimulus').sigTreeStateChanged.disconnect(self.generateStimulus)
+            self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.disconnect(
+                self.updateOutputFrequency)
         except TypeError:
             pass
+
+    def startAcquisition(self):
+        self.bender.start()
+
+        self.ui.plot2Widget.plot(x=self.bender.t[0:len(self.bender.encoder_in_data)],
+                                 y=self.bender.encoder_in_data, clear=True, pen='r')
+        self.ui.plot2Widget.setXLink(self.ui.plot1Widget)
 
     def browseOutputPath(self):
         outputPath = QtGui.QFileDialog.getExistingDirectory(self, "Choose output directory")
@@ -496,11 +188,11 @@ class BenderWindow(QtGui.QMainWindow):
         self.generateStimulus()
 
     def generateStimulus(self):
-        self.bender = BenderDAQ(self.params)
-        self.bender.make_stimulus()
+        self.bender.make_stimulus(self.params)
 
         if self.bender.t is not None:
             self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos, clear=True)
+            self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.vel, pen='r')
             Lbrush = pg.mkBrush(pg.hsvColor(0.0, sat=0.4, alpha=0.3))
             Rbrush = pg.mkBrush(pg.hsvColor(0.5, sat=0.4, alpha=0.3))
             for onoff in self.bender.Lonoff:
@@ -509,12 +201,20 @@ class BenderWindow(QtGui.QMainWindow):
             for onoff in self.bender.Ronoff:
                 self.ui.plot1Widget.addItem(pg.LinearRegionItem(onoff, movable=False, brush=Rbrush))
 
+            self.ui.plot2Widget.plot(x=self.bender.tout, y=self.bender.motorpulses, clear=True, pen='r')
+            self.ui.plot2Widget.plot(x=self.bender.tout, y=self.bender.motordirection, pen='b')
+
+            self.ui.plot2Widget.setXLink(self.ui.plot1Widget)
+
             self.updateFileName()
 
     def updateFileName(self):
         pattern = self.ui.fileNamePatternEdit.text()
         filename = self.getFileName(pattern)
         self.ui.fileNameLabel.setText(filename)
+
+    def updateOutputFrequency(self):
+        self.params["DAQ", "Output", "Sampling frequency"] = self.params["Motor parameters", "Maximum pulse frequency"] * 2
 
     def restartNumbering(self):
         self.ui.curFileNumberBox.setValue(1)
@@ -610,14 +310,15 @@ class BenderWindow(QtGui.QMainWindow):
         try:
             self.disconnectParameterSlots()
 
-            stimtype = str(settings.value("Stimulus/Type").toString())
-            if stimtype in stimParameterDefs:
-                stimParamGroup = self.params.child('Stimulus', 'Parameters')
-                stimParamGroup.clearChildren()
-                stimParamGroup.addChildren(stimParameterDefs[stimtype])
-            else:
-                assert False
-            self.curStimType = stimtype
+            if settings.contains("Stimulus/Type"):
+                stimtype = str(settings.value("Stimulus/Type").toString())
+                if stimtype in stimParameterDefs:
+                    stimParamGroup = self.params.child('Stimulus', 'Parameters')
+                    stimParamGroup.clearChildren()
+                    stimParamGroup.addChildren(stimParameterDefs[stimtype])
+                else:
+                    assert False
+                self.curStimType = stimtype
 
             self.readParameters(settings, self.params)
         finally:
@@ -625,6 +326,7 @@ class BenderWindow(QtGui.QMainWindow):
 
         settings.endGroup()
 
+        self.updateOutputFrequency()
         self.generateStimulus()
         self.updateFileName()
 
