@@ -136,6 +136,7 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
 
         self.bender = BenderDAQ()
+        self.bender.sigUpdate.connect(self.updatePlot)
         self.ui.goButton.clicked.connect(self.startAcquisition)
 
         self.readSettings()
@@ -160,11 +161,26 @@ class BenderWindow(QtGui.QMainWindow):
             pass
 
     def startAcquisition(self):
+        self.encoderPlot = self.ui.plot1Widget.plot(pen='k')
+        self.TxPlot = self.ui.plot2Widget.plot(pen='k', clear=True)
+        self.tacq = np.empty((0,))
+        self.encoderData = np.empty((0,))
+        self.aiData = np.empty((6,0,))
+
         self.bender.start()
 
         # self.ui.plot2Widget.plot(x=self.bender.t[0:len(self.bender.encoder_in_data)],
         #                          y=self.bender.encoder_in_data, clear=True, pen='r')
         # self.ui.plot2Widget.setXLink(self.ui.plot1Widget)
+
+    def updatePlot(self, t, aidata, encdata):
+        logging.debug('updatePlot')
+        self.tacq = np.append(self.tacq, t)
+        self.encoderData = np.append(self.encoderData, encdata)
+        self.aiData = np.append(self.aiData, aidata, axis=1)
+
+        self.encoderPlot.setData(x=self.tacq, y=self.encoderData)
+        self.TxPlot.setData(x=self.tacq, y=self.aiData[4,:])
 
     def browseOutputPath(self):
         outputPath = QtGui.QFileDialog.getExistingDirectory(self, "Choose output directory")

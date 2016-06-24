@@ -16,8 +16,13 @@ except ImportError:
 from settings import SETTINGS_FILE
 
 
-class BenderDAQ(object):
+class BenderDAQ(QtCore.QObject):
+    sigUpdate = QtCore.Signal(np.ndarray, np.ndarray, np.ndarray)  ## analog input buffer, encoder input buffer
+    sigDoneAcquiring = QtCore.Signal()
+
     def __init__(self):
+        QtCore.QObject.__init__(self)
+
         self.params = None
 
         self.t = None
@@ -51,8 +56,8 @@ class BenderDAQ(object):
         dur = self.params['Stimulus', 'Wait before'] + stim['Cycles'] / stim['Frequency'] + \
               self.params['Stimulus', 'Wait after']
 
-        nupdates = np.ceil(dur * self.params['DAQ', 'Update rate'])
-        dur = nupdates / self.params['DAQ', 'Update rate']
+        self.nupdates = int(np.ceil(dur * self.params['DAQ', 'Update rate']))
+        dur = float(self.nupdates) / self.params['DAQ', 'Update rate']
 
         self.duration = dur
 
@@ -110,7 +115,7 @@ class BenderDAQ(object):
             Ractcmd = Ractcmd * stim['Activation','Right voltage'] / stim['Activation','Right voltage scale']
 
         # upsample analog out
-        tout = np.arange(t[0], dur, 1 / self.params['DAQ', 'Output', 'Sampling frequency'])
+        tout = np.arange(0, dur, 1 / self.params['DAQ', 'Output', 'Sampling frequency']) + t[0]
 
         Lacthi = interpolate.interp1d(t, Lactcmd, kind='linear', assume_sorted=True, bounds_error=False,
                                       fill_value=0.0)(tout)
@@ -304,7 +309,6 @@ class BenderDAQ(object):
         self.outputbufferlen = 2*self.noutsamps
 
         # split the output data into blocks of noutsamps
-        self.nupdates = int(np.ceil(float(self.analog_out_data.shape[1]) / self.noutsamps))
         assert(self.analog_out_data.shape[1] == self.noutsamps*self.nupdates)
 
         self.analog_out_buffers = []
@@ -371,6 +375,8 @@ class BenderDAQ(object):
         self.updateNum = 0
 
         # allocate input buffers
+        self.t_buffer = np.split(self.t, self.nupdates)
+
         self.analog_in_data = np.zeros((6, self.ninsamps, self.nupdates), dtype=np.float64)
         self.encoder_in_data = np.zeros((self.ninsamps, self.nupdates), dtype=np.float64)
         self.analog_in_buffer = np.zeros((6, self.ninsamps), dtype=np.float64)
@@ -415,6 +421,8 @@ class BenderDAQ(object):
                                                 self.digital_out_buffers[self.updateNum+2],
                                                 daq.byref(dobyteswritten), None)
 
+            self.sigUpdate.emit(self.t_buffer[self.updateNum], self.analog_in_buffer, self.encoder_in_buffer)
+
             logging.debug('Read %d ai, %d enc' % (aibytesread.value, encbytesread.value))
             logging.debug('Wrote %d ao, %d dig' % (aobyteswritten.value, dobyteswritten.value))
 
@@ -435,3 +443,5 @@ class BenderDAQ(object):
             del self.encoder_in
             del self.analog_out
             del self.digital_out
+
+            self.sigDoneAcquiring.emit()
