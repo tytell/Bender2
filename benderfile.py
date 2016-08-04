@@ -19,24 +19,22 @@ class BenderFile(object):
             mode = 'w-'
         self.h5file = h5py.File(filename, mode=mode)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
     def setupFile(self, bender, params):
         # save the input data
         gin = self.h5file.create_group('RawInput')
-        gin.attrs['SampleFrequency'] = params['DAQ', 'Input', 'Sample frequency']
-
-        for i, aichan in enumerate(['xForce', 'yForce', 'zForce', 'xTorque', 'yTorque', 'zTorque']):
-            dset = gin.create_dataset(aichan, (0,), maxshape=(None,), chunks=(ninsamps,))
-            dset.attrs['HardwareChannel'] = params['DAQ', 'Input', aichan]
-
-        dset = gin.create_dataset('Encoder', (0,), maxshape=(None,), chunks=(ninsamps,))
-        dset.attrs['HardwareChannel'] = params['DAQ', 'Input', 'Encoder']
-        dset.attrs['CountsPerRev'] = params['DAQ', 'Input', 'Counts per revolution']
+        gin.attrs['SampleFrequency'] = params['DAQ', 'Input', 'Sampling frequency']
 
         gcal = self.h5file.create_group('Calibrated')
 
         # save the output data
         gout = self.h5file.create_group('Output')
-        gout.attrs['SampleFrequency'] = params['DAQ', 'Output', 'Sample frequency']
+        gout.attrs['SampleFrequency'] = params['DAQ', 'Output', 'Sampling frequency']
 
         dset = gout.create_dataset('Lact', data=bender.Lact)
         dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Left stimulus']
@@ -91,16 +89,23 @@ class BenderFile(object):
         self._writeParameters(gparams, params)
 
     def saveRawData(self, aidata, encdata, params):
-        gin = self.h5file.create_group('RawInput')
-        gin.attrs['SampleFrequency'] = params['DAQ', 'Input', 'Sample frequency']
+        gin = self.h5file.require_group('RawInput')
 
         for i, aichan in enumerate(['xForce', 'yForce', 'zForce', 'xTorque', 'yTorque', 'zTorque']):
-            dset = gin.create_dataset(aichan, data=aidata[i, :])
+            dset = gin.create_dataset(aichan, data=aidata[:, i])
             dset.attrs['HardwareChannel'] = params['DAQ', 'Input', aichan]
 
         dset = gin.create_dataset('Encoder', data=encdata)
         dset.attrs['HardwareChannel'] = params['DAQ', 'Input', 'Encoder']
         dset.attrs['CountsPerRev'] = params['DAQ', 'Input', 'Counts per revolution']
+
+    def saveCalibratedData(self, data, calibration, params):
+        gin = self.h5file.require_group('Calibrated')
+
+        for i, aichan in enumerate(['xForce', 'yForce', 'zForce', 'xTorque', 'yTorque', 'zTorque']):
+            dset = gin.create_dataset(aichan, data=data[:, i])
+
+        gin.create_dataset('CalibrationMatrix', data=calibration)
 
     def close(self):
         self.h5file.close()
@@ -110,7 +115,17 @@ class BenderFile(object):
             if ch.hasChildren():
                 sub = group.create_group(ch.name())
                 self._writeParameters(sub, ch)
-            elif ch.type() in ['float', 'int', 'list', 'str']:
-                group.attrs.create(ch.name(), ch.value())
+            elif ch.type() in ['float', 'int']:
+                try:
+                    group.attrs.create(ch.name(), ch.value())
+                except TypeError as err:
+                    logging.debug("Error saving {} = {}: {}".format(ch.name(), ch.value(), err))
+                    continue
+            elif ch.type() in ['list', 'str']:
+                try:
+                    group.attrs.create(ch.name(), str(ch.value()))
+                except TypeError as err:
+                    logging.debug("Error saving {} = {}: {}".format(ch.name(), ch.value(), err))
+                    continue
 
 

@@ -4,7 +4,7 @@ import os
 import string
 import logging
 from PyQt4 import QtGui, QtCore
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ElementTree
 import pickle
 import numpy as np
 from scipy import integrate, interpolate
@@ -16,6 +16,7 @@ import pyqtgraph as pg
 from bender_ui import Ui_BenderWindow
 
 from benderdaq import BenderDAQ
+from benderfile import BenderFile
 
 from settings import SETTINGS_FILE
 
@@ -61,7 +62,8 @@ parameterDefinitions = [
             {'name': 'xTorque', 'type': 'str', 'value': 'Dev1/ai3'},
             {'name': 'yTorque', 'type': 'str', 'value': 'Dev1/ai4'},
             {'name': 'zTorque', 'type': 'str', 'value': 'Dev1/ai5'},
-            {'name': 'Load calibration', 'type': 'action'},
+            {'name': 'Get calibration...', 'type': 'action'},
+            {'name': 'Calibration file', 'type': 'str', 'readonly': True},
             {'name': 'Encoder', 'type': 'str', 'value': 'Dev1/ctr0'},
             {'name': 'Counts per revolution', 'type': 'int', 'value': 10000, 'limits': (1, 100000)}
         ]},
@@ -105,6 +107,13 @@ parameterDefinitions = [
 
 
 class BenderWindow(QtGui.QMainWindow):
+    plotNames = {'X torque': 3,
+                 'Y force': 1,
+                 'X force': 0,
+                 'Y torque': 4,
+                 'Z force': 2,
+                 'Z torque': 5}
+
     def __init__(self):
         super(BenderWindow, self).__init__()
 
@@ -119,9 +128,11 @@ class BenderWindow(QtGui.QMainWindow):
 
         self.stimParamState = dict()
 
+        self.calibration = None
+
         self.ui.browseOutputPathButton.clicked.connect(self.browseOutputPath)
         self.ui.fileNamePatternEdit.editingFinished.connect(self.updateFileName)
-        self.ui.curFileNumberBox.valueChanged.connect(self.updateFileName)
+        self.ui.nextFileNumberBox.valueChanged.connect(self.updateFileName)
         self.ui.restartNumberingButton.clicked.connect(self.restartNumbering)
 
         self.ui.saveParametersButton.clicked.connect(self.saveParams)
@@ -149,6 +160,7 @@ class BenderWindow(QtGui.QMainWindow):
         self.params.child('DAQ', 'Update rate').sigValueChanged.connect(self.generateStimulus)
         self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.connect(self.updateOutputFrequency)
         self.params.child('Motor parameters').sigTreeStateChanged.connect(self.generateStimulus)
+        self.params.child('DAQ', 'Input', 'Get calibration...').sigActivated.connect(self.getCalibration)
 
     def disconnectParameterSlots(self):
         try:
@@ -158,20 +170,36 @@ class BenderWindow(QtGui.QMainWindow):
             self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.disconnect(
                 self.updateOutputFrequency)
             self.params.child('Motor parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
+            self.params.child('DAQ', 'Input', 'Get calibration...').sigActivated.disconnect(self.getCalibration)
         except TypeError:
             logging.warning('Problem disconnecting parameter slots')
             pass
 
     def startAcquisition(self):
+        if self.calibration is None or self.calibration.size == 0:
+            ret = QtGui.QMessageBox.warning(self, "You need to have a calibration!", buttons=QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel,
+                                            defaultButton=QtGui.QMessageBox.Ok)
+            if ret == QtGui.QMessageBox.Cancel:
+                return
+            self.getCalibration()
+
         self.ui.goButton.setText('Abort')
         self.ui.goButton.clicked.disconnect(self.startAcquisition)
         self.ui.goButton.clicked.connect(self.bender.abort)
 
+        pattern = self.ui.fileNamePatternEdit.text()
+        filename = self.getFileName(pattern)
+        self.ui.fileNameLabel.setText(filename)
+        self.curFileName = filename
+
         self.encoderPlot = self.ui.plot1Widget.plot(pen='k')
-        self.TxPlot = self.ui.plot2Widget.plot(pen='k', clear=True)
-        self.tacq = np.empty((0,))
-        self.encoderData = np.empty((0,))
-        self.aiData = np.empty((6,0,))
+
+        self.plot2 = self.ui.plot2Widget.plot(pen='k', clear=True)
+
+        self.ui.plot2Widget.setLabel('left', self.ui.plotYBox.currentText(), units='unscaled')
+        self.ui.plot2Widget.setLabel('bottom', "Time", units='sec')
+
+        self.plotYNum = self.plotNames[str(self.ui.plotYBox.currentText())]
 
         self.bender.start()
 
@@ -186,17 +214,119 @@ class BenderWindow(QtGui.QMainWindow):
         aidata = aidata.reshape((len(t), -1))
 
         self.encoderPlot.setData(x=t, y=encdata)
-        self.TxPlot.setData(x=t, y=aidata[:,4])
+        self.plot2.setData(x=t, y=aidata[:, self.plotYNum])
 
     def endAcquisition(self):
         self.ui.goButton.setText('Go')
         self.ui.goButton.clicked.disconnect(self.bender.abort)
         self.ui.goButton.clicked.connect(self.startAcquisition)
 
+        self.data = np.dot(self.bender.analog_in_data, self.calibration)
+        self.changePlot(xname=self.ui.plotXBox.currentText(), yname=self.ui.plotYBox.currentText(),
+                        colorbyname=self.ui.colorByBox.currentText())
+
+        filepath = str(self.ui.outputPathEdit.text())
+        filename, ext = os.path.splitext(self.curFileName)
+        with BenderFile(os.path.join(filepath, filename + '.h5'), allowoverwrite=True) as benderFile:
+            benderFile.setupFile(self.bender, self.params)
+            benderFile.saveRawData(self.bender.analog_in_data, self.bender.encoder_in_data, self.params)
+            benderFile.saveCalibratedData(self.data, self.calibration, self.params)
+
+        self.ui.nextFileNumberBox.setValue(self.ui.nextFileNumberBox.value() + 1)
+
+        self.ui.plotXBox.currentIndexChanged.connect(self.changePlotX)
+        self.ui.plotYBox.currentIndexChanged.connect(self.changePlotY)
+
+    def filterData(self):
+        pass
+    
+    def changePlot(self, xname, yname, colorbyname):
+        self.ui.plot2Widget.setXLink(None)
+        if xname == 'Time (sec)':
+            x = self.bender.t
+            xunit = 'sec'
+            self.ui.plot2Widget.setXLink(self.ui.plot1Widget)
+        elif xname == 'Time (cycles)':
+            x = self.bender.tnorm
+            xunit = 'cycles'
+        elif xname == 'Phase':
+            x = np.mod(self.bender.phase, 1)
+            xunit = ''
+        elif xname == 'Angle':
+            x = self.bender.encoder_in_data
+            xunit = 'deg'
+        else:
+            assert False
+
+        if str(yname) in self.plotNames:
+            y = self.data[:, self.plotNames[str(yname)]]
+            if 'force' in yname:
+                yunit = 'N'
+            elif 'torque' in yname:
+                yunit = 'N m'
+            else:
+                yunit = ''
+                logging.debug('Unrecognized y variable unit: %s', yname)
+        else:
+            assert False
+
+        self.plot2.setData(x=x, y=y)
+        self.ui.plot2Widget.setLabel('left', yname, units=yunit)
+        self.ui.plot2Widget.setLabel('bottom', xname, units=xunit)
+        self.ui.plot2Widget.autoRange()
+
+    def changePlotX(self, xind):
+        xname = self.ui.plotXBox.itemText(xind)
+        yname = self.ui.plotYBox.currentText()
+        colorbyname = self.ui.colorByBox.currentText()
+        self.changePlot(xname, yname, colorbyname)
+
+    def changePlotY(self, yind):
+        yname = self.ui.plotYBox.itemText(yind)
+        xname = self.ui.plotXBox.currentText()
+        colorbyname = self.ui.colorByBox.currentText()
+        self.changePlot(xname, yname, colorbyname)
+
     def browseOutputPath(self):
         outputPath = QtGui.QFileDialog.getExistingDirectory(self, "Choose output directory")
         if outputPath:
             self.ui.outputPathEdit.setText(outputPath)
+
+    def getCalibration(self):
+        calibrationFile = self.params['DAQ', 'Input', 'Calibration file']
+        if not calibrationFile:
+            calibrationFile = QtCore.QString()
+        calibrationFile = QtGui.QFileDialog.getOpenFileName(self, "Choose calibration file", directory=calibrationFile,
+                                                            filter="*.cal")
+        if calibrationFile:
+            self.params['DAQ', 'Input', 'Calibration file'] = calibrationFile
+
+            self.loadCalibration()
+
+    def loadCalibration(self):
+        calibrationFile = self.params['DAQ', 'Input', 'Calibration file']
+        if not calibrationFile:
+            return
+        if not os.path.exists(calibrationFile):
+            raise IOError("Calibration file %s not found", calibrationFile)
+
+        try:
+            tree = ElementTree.parse(calibrationFile)
+            cal = tree.getroot().find('Calibration')
+            if cal is None:
+                raise IOError('Not a calibration XML file')
+
+            mat = []
+            for ax in cal.findall('UserAxis'):
+                txt = ax.get('values')
+                row = [float(v) for v in txt.split()]
+                mat.append(row)
+
+        except IOError:
+            logging.warning('Bad calibration file')
+            return
+
+        self.calibration = np.array(mat).T
 
     def changeStimType(self, param, value):
         stimParamGroup = self.params.child('Stimulus', 'Parameters')
@@ -238,13 +368,13 @@ class BenderWindow(QtGui.QMainWindow):
     def updateFileName(self):
         pattern = self.ui.fileNamePatternEdit.text()
         filename = self.getFileName(pattern)
-        self.ui.fileNameLabel.setText(filename)
+        self.ui.nextFileNameLabel.setText(filename)
 
     def updateOutputFrequency(self):
         self.params["DAQ", "Output", "Sampling frequency"] = self.params["Motor parameters", "Maximum pulse frequency"] * 2
 
     def restartNumbering(self):
-        self.ui.curFileNumberBox.setValue(1)
+        self.ui.nextFileNumberBox.setValue(1)
 
     def getFileName(self, filepattern):
         stim = self.params.child('Stimulus', 'Parameters')
@@ -262,7 +392,7 @@ class BenderWindow(QtGui.QMainWindow):
                              'ph': stim['Activation', 'Phase'],
                              'lv': stim['Activation', 'Left voltage'],
                              'rv': stim['Activation', 'Right voltage'],
-                             'num': self.ui.curFileNumberBox.value()})
+                             'num': self.ui.nextFileNumberBox.value()})
 
             if not stim['Activation', 'On']:
                 data['lv'] = 0
@@ -327,9 +457,9 @@ class BenderWindow(QtGui.QMainWindow):
         settings.beginGroup("File")
         self.ui.outputPathEdit.setText(settings.value("OutputPath").toString())
         self.ui.fileNamePatternEdit.setText(settings.value("FileNamePattern").toString())
-        v, ok = settings.value("CurrentFileNumber").toInt()
+        v, ok = settings.value("NextFileNumber").toInt()
         if ok:
-            self.ui.curFileNumberBox.setValue(v)
+            self.ui.nextFileNumberBox.setValue(v)
         settings.endGroup()
 
         settings.beginGroup("ParameterTree")
@@ -357,6 +487,8 @@ class BenderWindow(QtGui.QMainWindow):
         self.generateStimulus()
         self.updateFileName()
 
+        self.loadCalibration()
+
     def writeSettings(self):
         settings = QtCore.QSettings(SETTINGS_FILE, QtCore.QSettings.IniFormat)
 
@@ -372,7 +504,7 @@ class BenderWindow(QtGui.QMainWindow):
         settings.beginGroup("File")
         settings.setValue("OutputPath", self.ui.outputPathEdit.text())
         settings.setValue("FileNamePattern", self.ui.fileNamePatternEdit.text())
-        settings.setValue("CurrentFileNumber", self.ui.curFileNumberBox.value())
+        settings.setValue("NextFileNumber", self.ui.nextFileNumberBox.value())
         settings.endGroup()
 
         settings.beginGroup("ParameterTree")

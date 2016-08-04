@@ -73,9 +73,9 @@ class BenderDAQ(QtCore.QObject):
         vel[t < 0] = 0
         vel[t > stim['Cycles'] / stim['Frequency']] = 0
 
-        phase = t * stim['Frequency']
-        phase[t < 0] = -1
-        phase[t > stim['Cycles'] / stim['Frequency']] = -1
+        tnorm = t * stim['Frequency']
+        tnorm[t < 0] = -1
+        tnorm[t > stim['Cycles'] / stim['Frequency']] = -1
 
         # make activation
         actburstdur = stim['Activation','Duty']/100.0 / stim['Frequency']
@@ -85,8 +85,8 @@ class BenderDAQ(QtCore.QObject):
         actpulsephase = t[np.logical_and(t > 0, t < actburstdur)] * stim['Activation','Pulse rate']
         burst = (np.mod(actpulsephase, 1) < 0.5).astype(np.float)
 
-        bendphase = phase - 0.25
-        bendphase[phase == -1] = -1
+        bendphase = tnorm - 0.25
+        bendphase[tnorm == -1] = -1
 
         Lactcmd = np.zeros_like(t)
         Ractcmd = np.zeros_like(t)
@@ -128,7 +128,8 @@ class BenderDAQ(QtCore.QObject):
         self.t = t
         self.pos = pos
         self.vel = vel
-        self.phase = phase
+        self.tnorm = tnorm
+        self.phase = np.mod(tnorm, 1)
         self.duration = dur
 
         self.tout = tout
@@ -170,17 +171,17 @@ class BenderDAQ(QtCore.QObject):
             f[t < 0] = np.nan
             f[t > dur] = np.nan
 
-            phase = 2*np.pi*stim['Start frequency'] * (np.exp(t * lnk) - 1)/lnk
+            tnorm = 2*np.pi*stim['Start frequency'] * (np.exp(t * lnk) - 1)/lnk
 
-            phase[t < 0] = np.nan
-            phase[t > dur] = np.nan
+            tnorm[t < 0] = np.nan
+            tnorm[t > dur] = np.nan
 
             logging.debug('stim children: {}'.format(stim.children()))
             a0 = stim['Start frequency'] ** stim['Frequency exponent']
-            pos = stim['Amplitude']/a0 * (np.power(f, stim['Frequency exponent'])) * np.sin(phase)
+            pos = stim['Amplitude']/a0 * (np.power(f, stim['Frequency exponent'])) * np.sin(tnorm)
             vel = stim['Amplitude']/a0 * np.exp(stim['Frequency exponent']*t*lnk) * lnk * \
-                  (stim['Frequency exponent'] * np.sin(phase) +
-                   2*np.pi/lnk * f * np.cos(phase))
+                  (stim['Frequency exponent'] * np.sin(tnorm) +
+                   2*np.pi/lnk * f * np.cos(tnorm))
 
         elif sweeptype == 'Linear':
             k = (stim['End frequency'] - stim['Start frequency']) / dur
@@ -189,13 +190,13 @@ class BenderDAQ(QtCore.QObject):
             f[t < 0] = np.nan
             f[t > stim['Cycles'] / stim['Frequency']] = np.nan
 
-            phase = 2*np.pi*(stim['Start frequency']*t + k/2 * np.power(t, 2))
+            tnorm = 2*np.pi*(stim['Start frequency']*t + k/2 * np.power(t, 2))
 
             b = stim['Frequency exponent']
             a0 = stim['Start frequency'] ** b
-            pos = stim['Amplitude']/a0 * np.power(f, b) * np.sin(phase)
-            vel = stim['Amplitude']/a0 * (b * k * np.power(f, b-1) * np.sin(phase) +
-                                          2*np.pi * np.power(f, b+1) * np.cos(phase))
+            pos = stim['Amplitude']/a0 * np.power(f, b) * np.sin(tnorm)
+            vel = stim['Amplitude']/a0 * (b * k * np.power(f, b-1) * np.sin(tnorm) +
+                                          2*np.pi * np.power(f, b+1) * np.cos(tnorm))
         else:
             raise ValueError("Unrecognized frequency sweep type: {}".format(stim['Frequency change']))
 
@@ -205,8 +206,8 @@ class BenderDAQ(QtCore.QObject):
         vel[t < 0] = 0
         vel[t > dur] = 0
 
-        phase[t < 0] = 0
-        phase[t > dur] = 0
+        tnorm[t < 0] = 0
+        tnorm[t > dur] = 0
 
         if self.params['Stimulus', 'Wait after'] > 0.5:
             isramp = np.logical_and(t >= dur, t < dur+0.5)
@@ -230,7 +231,8 @@ class BenderDAQ(QtCore.QObject):
         self.t = t
         self.pos = pos
         self.vel = vel
-        self.phase = phase
+        self.tnorm = tnorm
+        self.phase = np.mod(tnorm, 1)
         self.duration = totaldur
 
         self.tout = tout
@@ -326,6 +328,17 @@ class BenderDAQ(QtCore.QObject):
             assert (dobuf.flags.c_contiguous)
             self.digital_out_buffers.append(dobuf)
 
+        # write two additional buffers full of zeros
+        aobuf = np.zeros((self.analog_out_data.shape[0], self.noutsamps))
+        self.analog_out_buffers.append(aobuf)
+        aobuf = np.zeros((self.analog_out_data.shape[0], self.noutsamps))
+        self.analog_out_buffers.append(aobuf)
+
+        dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
+        self.digital_out_buffers.append(dobuf)
+        dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
+        self.digital_out_buffers.append(dobuf)
+
         # analog output (stimulus)
         self.analog_out = daq.Task()
         aobyteswritten = daq.int32()
@@ -342,6 +355,7 @@ class BenderDAQ(QtCore.QObject):
         self.analog_out.CfgDigEdgeStartTrig("ai/StartTrigger", daq.DAQmx_Val_Rising)
 
         # write the output data
+        self.analog_out.SetWriteRegenMode(daq.DAQmx_Val_DoNotAllowRegen)
         self.analog_out.WriteAnalogF64(self.outputbufferlen, False, 10,
                                        daq.DAQmx_Val_GroupByChannel,
                                        np.column_stack(tuple(self.analog_out_buffers[0:2])),
@@ -361,6 +375,7 @@ class BenderDAQ(QtCore.QObject):
                                           self.outputbufferlen)
 
         # write the digital data
+        self.digital_out.SetWriteRegenMode(daq.DAQmx_Val_DoNotAllowRegen)
         self.digital_out.WriteDigitalU8(self.outputbufferlen, False, 10,
                                         daq.DAQmx_Val_GroupByChannel,
                                         np.concatenate(tuple(self.digital_out_buffers[0:2])),
@@ -403,16 +418,16 @@ class BenderDAQ(QtCore.QObject):
             interval = 1.0 / self.params['DAQ', 'Update rate']
 
             # read the input data
-            self.analog_in.ReadAnalogF64(self.ninsamps, interval*0.1,
-                                         daq.DAQmx_Val_GroupByChannel,
-                                         self.analog_in_buffer, self.analog_in_buffer.size,
-                                         daq.byref(aibytesread), None)
-            self.analog_in_data[self.updateNum, :, :] = self.analog_in_buffer.T
-            self.encoder_in.ReadCounterF64(self.ninsamps, interval*0.1, self.encoder_in_buffer,
-                                           self.encoder_in_buffer.size, daq.byref(encbytesread), None)
-            self.encoder_in_data[self.updateNum, :] = self.encoder_in_buffer
+            try:
+                self.analog_in.ReadAnalogF64(self.ninsamps, interval*0.1,
+                                             daq.DAQmx_Val_GroupByChannel,
+                                             self.analog_in_buffer, self.analog_in_buffer.size,
+                                             daq.byref(aibytesread), None)
+                self.analog_in_data[self.updateNum, :, :] = self.analog_in_buffer.T
+                self.encoder_in.ReadCounterF64(self.ninsamps, interval*0.1, self.encoder_in_buffer,
+                                               self.encoder_in_buffer.size, daq.byref(encbytesread), None)
+                self.encoder_in_data[self.updateNum, :] = self.encoder_in_buffer
 
-            if self.updateNum+2 < self.nupdates:
                 logging.debug('%d: max = %f' % (self.updateNum, np.max(self.analog_out_buffers[self.updateNum+2])))
                 self.analog_out.WriteAnalogF64(self.noutsamps, False, 10,
                                                daq.DAQmx_Val_GroupByChannel,
@@ -422,6 +437,10 @@ class BenderDAQ(QtCore.QObject):
                                                 daq.DAQmx_Val_GroupByChannel,
                                                 self.digital_out_buffers[self.updateNum+2],
                                                 daq.byref(dobyteswritten), None)
+            except daq.DAQError as err:
+                logging.debug('Error! {}'.format(err))
+                self.abort()
+                return
 
             self.sigUpdate.emit(self.t_buffer[0:self.updateNum+1, :], self.analog_in_data[0:self.updateNum+1, :, :],
                                 self.encoder_in_data[0:self.updateNum+1, :])
@@ -440,7 +459,7 @@ class BenderDAQ(QtCore.QObject):
             self.timer.stop()
             self.timer.timeout.disconnect(self.update)
 
-            self.analog_in_data = np.reshape(self.analog_in_data, (6, -1))
+            self.analog_in_data = np.reshape(self.analog_in_data, (-1, 6))
             self.encoder_in_data = np.reshape(self.encoder_in_data, (-1,))
 
             del self.analog_in
@@ -455,10 +474,26 @@ class BenderDAQ(QtCore.QObject):
         self.timer.stop()
         self.timer.timeout.disconnect(self.update)
 
-        self.analog_out.StopTask()
-        self.digital_out.StopTask()
-        self.analog_in.StopTask()
-        self.encoder_in.StopTask()
+        # try to stop each of the tasks, and ignore any DAQ errors
+        try:
+            self.analog_out.StopTask()
+        except daq.DAQError as err:
+            logging.debug('Error stopping analog_out: {}'.format(err))
+
+        try:
+            self.digital_out.StopTask()
+        except daq.DAQError as err:
+            logging.debug('Error stopping analog_out: {}'.format(err))
+
+        try:
+            self.analog_in.StopTask()
+        except daq.DAQError as err:
+            logging.debug('Error stopping analog_out: {}'.format(err))
+
+        try:
+            self.encoder_in.StopTask()
+        except daq.DAQError as err:
+            logging.debug('Error stopping analog_out: {}'.format(err))
 
         self.analog_in_data = np.reshape(self.analog_in_data, (6, -1))
         self.encoder_in_data = np.reshape(self.encoder_in_data, (-1,))
