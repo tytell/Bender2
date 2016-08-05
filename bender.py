@@ -7,7 +7,8 @@ from PyQt4 import QtGui, QtCore
 import xml.etree.ElementTree as ElementTree
 import pickle
 import numpy as np
-from scipy import integrate, interpolate
+from scipy import signal, integrate, interpolate
+import h5py
 
 import pyqtgraph.parametertree.parameterTypes as pTypes
 from pyqtgraph.parametertree import Parameter, ParameterTree, ParameterItem, registerParameterType
@@ -129,6 +130,7 @@ class BenderWindow(QtGui.QMainWindow):
         self.stimParamState = dict()
 
         self.calibration = None
+        self.filter = None
 
         self.ui.browseOutputPathButton.clicked.connect(self.browseOutputPath)
         self.ui.fileNamePatternEdit.editingFinished.connect(self.updateFileName)
@@ -142,7 +144,7 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
 
         self.bender = BenderDAQ()
-        self.bender.sigUpdate.connect(self.updatePlot)
+        self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
         self.bender.sigDoneAcquiring.connect(self.endAcquisition)
 
         self.ui.goButton.clicked.connect(self.startAcquisition)
@@ -187,6 +189,8 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.goButton.clicked.disconnect(self.startAcquisition)
         self.ui.goButton.clicked.connect(self.bender.abort)
 
+        self.ui.overlayCheck.setChecked(False)
+
         pattern = self.ui.fileNamePatternEdit.text()
         filename = self.getFileName(pattern)
         self.ui.fileNameLabel.setText(filename)
@@ -195,6 +199,7 @@ class BenderWindow(QtGui.QMainWindow):
         self.encoderPlot = self.ui.plot1Widget.plot(pen='k')
 
         self.plot2 = self.ui.plot2Widget.plot(pen='k', clear=True)
+        self.overlayPlot = self.ui.plot2Widget.plot(pen='r', clear=False)
 
         self.ui.plot2Widget.setLabel('left', self.ui.plotYBox.currentText(), units='unscaled')
         self.ui.plot2Widget.setLabel('bottom', "Time", units='sec')
@@ -207,7 +212,7 @@ class BenderWindow(QtGui.QMainWindow):
         #                          y=self.bender.encoder_in_data, clear=True, pen='r')
         # self.ui.plot2Widget.setXLink(self.ui.plot1Widget)
 
-    def updatePlot(self, t, aidata, encdata):
+    def updateAcquisitionPlot(self, t, aidata, encdata):
         logging.debug('updatePlot')
         t = t.flatten()
         encdata = encdata.flatten()
@@ -221,9 +226,10 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.goButton.clicked.disconnect(self.bender.abort)
         self.ui.goButton.clicked.connect(self.startAcquisition)
 
-        self.data = np.dot(self.bender.analog_in_data, self.calibration)
-        self.changePlot(xname=self.ui.plotXBox.currentText(), yname=self.ui.plotYBox.currentText(),
-                        colorbyname=self.ui.colorByBox.currentText())
+        self.data0 = np.dot(self.bender.analog_in_data, self.calibration)
+        self.data = self.filterData()
+
+        self.updatePlot()
 
         filepath = str(self.ui.outputPathEdit.text())
         filename, ext = os.path.splitext(self.curFileName)
@@ -237,11 +243,51 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.plotXBox.currentIndexChanged.connect(self.changePlotX)
         self.ui.plotYBox.currentIndexChanged.connect(self.changePlotY)
 
-    def filterData(self):
-        pass
-    
-    def changePlot(self, xname, yname, colorbyname):
-        self.ui.plot2Widget.setXLink(None)
+        self.ui.filterCheck.stateChanged.connect(self.filterChecked)
+        self.ui.filterCutoffBox.valueChanged.connect(self.filterCutoffChanged)
+
+        self.ui.overlayCheck.stateChanged.connect(self.overlayChecked)
+        self.ui.overlayFromBox.currentIndexChanged.connect(self.overlayFromChanged)
+        self.ui.overlayColorBox.currentIndexChanged.connect(self.overlayColorChanged)
+
+    def filterChecked(self, state):
+        self.data = self.filterData(buildfilter=True)
+        self.updatePlot()
+
+    def filterCutoffChanged(self, cutoff):
+        self.data = self.filterData(buildfilter=True)
+        self.updatePlot()
+
+    def filterData(self, buildfilter=False, data0=None):
+        if self.ui.filterCheck.isChecked():
+            if self.filter is None or buildfilter:
+                cutoff = self.ui.filterCutoffBox.value()
+                sampfreq = self.params['DAQ', 'Input', 'Sampling frequency']
+
+                b, a = signal.butter(5, cutoff / (sampfreq / 2))
+                self.filter = (b, a)
+
+            if data0 is None:
+                data0 = self.data0
+
+            data = []
+            if data0.ndim == 1:
+                data = signal.filtfilt(self.filter[0], self.filter[1], data0)
+            else:
+                for data1 in data0.T:
+                    data1 = signal.filtfilt(self.filter[0], self.filter[1], data1)
+                    data.append(data1)
+
+                data = np.array(data).T
+        else:
+            data = self.data0
+        return data
+
+    def updatePlot(self):
+        self.changePlot(xname=self.ui.plotXBox.currentText(), yname=self.ui.plotYBox.currentText(),
+                        colorbyname=self.ui.colorByBox.currentText())
+
+    def getX(self, xname):
         if xname == 'Time (sec)':
             x = self.bender.t
             xunit = 'sec'
@@ -258,6 +304,9 @@ class BenderWindow(QtGui.QMainWindow):
         else:
             assert False
 
+        return x, xunit
+
+    def getY(self, yname):
         if str(yname) in self.plotNames:
             y = self.data[:, self.plotNames[str(yname)]]
             if 'force' in yname:
@@ -270,10 +319,20 @@ class BenderWindow(QtGui.QMainWindow):
         else:
             assert False
 
+        return y, yunit
+
+    def changePlot(self, xname, yname, colorbyname):
+        self.ui.plot2Widget.setXLink(None)
+
+        x, xunit = self.getX(xname)
+        y, yunit = self.getY(yname)
+
         self.plot2.setData(x=x, y=y)
         self.ui.plot2Widget.setLabel('left', yname, units=yunit)
         self.ui.plot2Widget.setLabel('bottom', xname, units=xunit)
         self.ui.plot2Widget.autoRange()
+
+        self.getWork()
 
     def changePlotX(self, xind):
         xname = self.ui.plotXBox.itemText(xind)
@@ -286,6 +345,133 @@ class BenderWindow(QtGui.QMainWindow):
         xname = self.ui.plotXBox.currentText()
         colorbyname = self.ui.colorByBox.currentText()
         self.changePlot(xname, yname, colorbyname)
+
+    def overlayChecked(self, state):
+        self.updateOverlay()
+
+    def overlayFromChanged(self, fromName):
+        self.updateOverlay()
+
+    def overlayColorChanged(self, color):
+        self.overlayPlot.setPen(color)
+
+    def loadOtherData(self, otherFile):
+        try:
+            with h5py.File(otherFile, 'r') as f:
+                yname = str(self.ui.plotYOverlayBox.currentText())
+                dsetName = BenderFile.datasetNames[yname]
+
+                g = f['Calibrated']
+                y = np.array(g[dsetName])
+
+                y = self.filterData(data0=y)
+
+                if 'force' in yname:
+                    yunit = 'N'
+                elif 'torque' in yname:
+                    yunit = 'N m'
+                else:
+                    yunit = ''
+                    logging.debug('Unrecognized y variable unit: %s', yname)
+
+                xname = self.ui.plotXBox.currentText()
+
+                g = f['NominalStimulus']
+                if xname == 'Time (sec)':
+                    x = g['t']
+                    xunit = 'sec'
+                elif xname == 'Time (cycles)':
+                    x = g['tnorm']
+                    xunit = 'cycles'
+                elif xname == 'Phase':
+                    x = g['Phase']
+                    xunit = ''
+                elif xname == 'Angle':
+                    g = f['RawInput']
+                    x = g['Encoder']
+                    xunit = 'deg'
+                else:
+                    assert False
+
+                x = np.array(x)
+        except IOError:
+            x, y = None, None
+            xunit, yunit = '', ''
+
+        return x, xunit, y, yunit
+
+    def updateOverlay(self):
+        if self.ui.overlayCheck.isChecked():
+            xname = self.ui.plotXBox.currentText()
+            yname = self.ui.plotYOverlayBox.currentText()
+
+            if self.ui.overlayFromBox.currentText() == "Current file":
+                x, xunit = self.getX(xname)
+
+                if yname == self.ui.plotYBox.currentText():
+                    return
+
+                y, yunit = self.getY(yname)
+            else:
+                if self.ui.overlayFromBox.currentText() == "Other file...":
+                    otherFile = QtGui.QFileDialog.getOpenFileName(self, "Choose other data file",
+                                                                  filter="*.h5")
+                else:
+                    otherFile = self.ui.overlayFromBox.currentText()
+
+                ind = self.ui.overlayFromBox.findText(otherFile)
+                if ind == -1:
+                    self.ui.overlayFromBox.addItem(otherFile)
+                else:
+                    self.ui.overlayFromBox.setCurrentIndex(ind)
+
+                x, xunit, y, yunit = self.loadOtherData(str(otherFile))
+
+            self.overlayPlot.setData(x=x, y=y)
+            if yname != self.ui.plotYBox.currentText():
+                self.ui.plot2Widget.setLabel('right', yname, units=yunit)
+            self.ui.plot2Widget.setLabel('bottom', xname, units=xunit)
+            self.ui.plot2Widget.autoRange()
+        else:
+            self.overlayPlot.setData(x=[], y=[])
+            self.ui.plot2Widget.hideAxis('right')
+            self.ui.plot2Widget.autoRange()
+
+    def getWork(self):
+        tnorm = self.bender.tnorm
+        t = self.bender.t
+
+        maxcyc = np.max(tnorm)
+        if np.ceil(maxcyc) - maxcyc < 0.01:
+            maxcyc = np.ceil(maxcyc)
+        else:
+            maxcyc = np.floor(maxcyc)
+
+        angle = self.bender.encoder_in_data
+
+        yname = self.ui.plotYBox.currentText()
+        y, yunit = self.getY(yname)
+
+        xname = self.ui.plotXBox.currentText()
+        x, xunit = self.getX(xname)
+
+        vr = self.ui.plot2Widget.viewRange()
+        yctr = (vr[1][1] + vr[1][0])/2
+
+        work = []
+        xmean = []
+        for c in range(0, int(maxcyc) - 1):
+            iscycle = np.logical_and(tnorm >= c, tnorm <= c + 1)
+            if any(iscycle):
+                w1 = integrate.trapz(y[iscycle], x=angle[iscycle])
+                work.append(w1)
+
+                xmean1 = np.mean(x[iscycle])
+                xmean.append(xmean1)
+
+                text = pg.TextItem('{:.4f}'.format(w1))
+                self.ui.plot2Widget.addItem(text)
+                text.setPos(xmean1, yctr)
 
     def browseOutputPath(self):
         outputPath = QtGui.QFileDialog.getExistingDirectory(self, "Choose output directory")

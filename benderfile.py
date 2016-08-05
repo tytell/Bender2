@@ -8,6 +8,13 @@ import numpy as np
 from scipy import integrate, interpolate
 
 class BenderFile(object):
+    datasetNames = {'X force': 'xForce',
+                    'Y force': 'yForce',
+                    'Z force': 'zForce',
+                    'X torque': 'xTorque',
+                    'Y torque': 'yTorque',
+                    'Z torque': 'zTorque'}
+
     def __init__(self, filename, allowoverwrite=False):
         if not allowoverwrite and os.path.exists(filename):
             raise IOError('File exists')
@@ -58,6 +65,8 @@ class BenderFile(object):
         gout.create_dataset('Position', data=bender.pos)
         gout.create_dataset('Velocity', data=bender.vel)
         gout.create_dataset('Phase', data=bender.phase)
+        gout.create_dataset('t', data=bender.t)
+        gout.create_dataset('tnorm', data=bender.tnorm)
 
         stim = params.child('Stimulus', 'Parameters')
         if params['Stimulus', 'Type'] == 'Sine':
