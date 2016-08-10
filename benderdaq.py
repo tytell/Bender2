@@ -75,7 +75,7 @@ class BenderDAQ(QtCore.QObject):
 
         tnorm = t * stim['Frequency']
         tnorm[t < 0] = -1
-        tnorm[t > stim['Cycles'] / stim['Frequency']] = -1
+        tnorm[t > stim['Cycles'] / stim['Frequency']] = np.ceil(np.max(tnorm))
 
         # make activation
         actburstdur = stim['Activation','Duty']/100.0 / stim['Frequency']
@@ -173,8 +173,8 @@ class BenderDAQ(QtCore.QObject):
 
             tnorm = 2*np.pi*stim['Start frequency'] * (np.exp(t * lnk) - 1)/lnk
 
-            tnorm[t < 0] = np.nan
-            tnorm[t > dur] = np.nan
+            tnorm[t < 0] = -1
+            tnorm[t > dur] = np.ceil(np.max(tnorm))
 
             logging.debug('stim children: {}'.format(stim.children()))
             a0 = stim['Start frequency'] ** stim['Frequency exponent']
@@ -206,8 +206,8 @@ class BenderDAQ(QtCore.QObject):
         vel[t < 0] = 0
         vel[t > dur] = 0
 
-        tnorm[t < 0] = 0
-        tnorm[t > dur] = 0
+        tnorm[t < 0] = -1
+        tnorm[t > dur] = np.ceil(np.max(tnorm))
 
         if self.params['Stimulus', 'Wait after'] > 0.5:
             isramp = np.logical_and(t >= dur, t < dur+0.5)
