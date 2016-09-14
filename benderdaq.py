@@ -262,15 +262,19 @@ class BenderDAQ(QtCore.QObject):
             raise ValueError('Motion is too fast!')
 
         motorstep = np.zeros_like(tout, dtype=np.uint8)
+        motordirection = np.zeros_like(tout, dtype=np.uint8)
         curpos = pos[0]
         for i, cmdpos in enumerate(poshi, start=1):
+            motordirection[i] = motordirection[i-1]
             if motorstep[i-1] == 1:
                 # can't step twice in a row
                 continue
-            elif abs(cmdpos - curpos) >= stepsize:
+            elif cmdpos - curpos >= stepsize:
                 motorstep[i] = 1
-
-        motordirection = (vel <= 0).astype(np.uint8)
+                motordirection[i] = 0
+            elif cmdpos - curpos <= -stepsize:
+                motorstep[i] = 1
+                motordirection[i] = 1
 
         motorenable = np.ones_like(motordirection)
         motorenable[-5:] = 0

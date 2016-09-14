@@ -131,6 +131,10 @@ class BenderWindow(QtGui.QMainWindow):
         self.params = Parameter.create(name='params', type='group', children=parameterDefinitions)
         self.ui.parameterTreeWidget.setParameters(self.params, showTop=False)
 
+        if MOTOR_TYPE == 'stepper':
+            self.params.child('DAQ', 'Output', 'Sampling frequency').setWritable()
+            self.params['DAQ', 'Output', 'Sampling frequency'] = 100000
+
         stimtype = self.params.child('Stimulus', 'Type')
         self.curStimType = stimtype.value()
         self.connectParameterSlots()
@@ -171,7 +175,8 @@ class BenderWindow(QtGui.QMainWindow):
         self.params.child('Stimulus', 'Type').sigValueChanged.connect(self.changeStimType)
         self.params.child('Stimulus').sigTreeStateChanged.connect(self.generateStimulus)
         self.params.child('DAQ', 'Update rate').sigValueChanged.connect(self.generateStimulus)
-        self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.connect(self.updateOutputFrequency)
+        if MOTOR_TYPE == 'velocity':
+            self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.connect(self.updateOutputFrequency)
         self.params.child('Motor parameters').sigTreeStateChanged.connect(self.generateStimulus)
         self.params.child('DAQ', 'Input', 'Get calibration...').sigActivated.connect(self.getCalibration)
 
@@ -180,8 +185,9 @@ class BenderWindow(QtGui.QMainWindow):
             self.params.child('Stimulus', 'Type').sigValueChanged.disconnect(self.changeStimType)
             self.params.child('Stimulus').sigTreeStateChanged.disconnect(self.generateStimulus)
             self.params.child('DAQ', 'Update rate').sigValueChanged.disconnect(self.generateStimulus)
-            self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.disconnect(
-                self.updateOutputFrequency)
+            if MOTOR_TYPE == 'velocity':
+                self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.disconnect(
+                    self.updateOutputFrequency)
             self.params.child('Motor parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
             self.params.child('DAQ', 'Input', 'Get calibration...').sigActivated.disconnect(self.getCalibration)
         except TypeError:
@@ -623,8 +629,15 @@ class BenderWindow(QtGui.QMainWindow):
         self.curStimType = value
         self.generateStimulus()
 
-    def generateStimulus(self):
-        self.bender.make_stimulus(self.params)
+    def generateStimulus(self, showwarning=True):
+        try:
+            self.bender.make_stimulus(self.params)
+        except ValueError as err:
+            if showwarning:
+                QtGui.QMessageBox.warning(self, 'Warning', err.strerror)
+            else:
+                raise
+            return
 
         if self.bender.t is not None:
             self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos, clear=True)
@@ -650,7 +663,8 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.nextFileNameLabel.setText(filename)
 
     def updateOutputFrequency(self):
-        self.params["DAQ", "Output", "Sampling frequency"] = self.params["Motor parameters", "Maximum pulse frequency"] * 2
+        if MOTOR_TYPE == 'velocity':
+            self.params["DAQ", "Output", "Sampling frequency"] = self.params["Motor parameters", "Maximum pulse frequency"] * 2
 
     def restartNumbering(self):
         self.ui.nextFileNumberBox.setValue(1)
@@ -762,11 +776,15 @@ class BenderWindow(QtGui.QMainWindow):
 
         settings.endGroup()
 
-        self.updateOutputFrequency()
-        self.generateStimulus()
-        self.updateFileName()
+        try:
+            self.updateOutputFrequency()
+            self.generateStimulus(showwarning=False)
+            self.updateFileName()
 
-        self.loadCalibration()
+            self.loadCalibration()
+        except ValueError:
+            # skip over problems with the settings
+            pass
 
     def writeSettings(self):
         settings = QtCore.QSettings(SETTINGS_FILE, QtCore.QSettings.IniFormat)
