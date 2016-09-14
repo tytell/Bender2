@@ -13,7 +13,7 @@ try:
 except ImportError:
     pass
 
-from settings import SETTINGS_FILE
+from settings import SETTINGS_FILE, MOTOR_TYPE
 
 
 class BenderDAQ(QtCore.QObject):
@@ -30,6 +30,13 @@ class BenderDAQ(QtCore.QObject):
         self.vel = None
         self.duration = None
         self.digital_out = None
+
+        if MOTOR_TYPE == 'stepper':
+            self.make_motor_pulses = self.make_motor_stepper_pulses
+        elif MOTOR_TYPE == 'velocity':
+            self.make_motor_pulses = self.make_motor_velocity_pulses
+        else:
+            raise Exception("Unknown motor type %s", MOTOR_TYPE)
 
     def make_stimulus(self, parameters):
         self.params = parameters
@@ -123,7 +130,7 @@ class BenderDAQ(QtCore.QObject):
                                       fill_value=0.0)(tout)
 
         self.analog_out_data = np.row_stack((Lacthi, Racthi))
-        self.digital_out_data = self.make_motor_pulses(t, vel, tout)
+        self.digital_out_data = self.make_motor_pulses(t, pos, vel, tout)
 
         self.t = t
         self.pos = pos
@@ -243,7 +250,42 @@ class BenderDAQ(QtCore.QObject):
         self.Lonoff = np.array([])
         self.Ronoff = np.array([])
 
-    def make_motor_pulses(self, t, vel, tout):
+    def make_motor_stepper_pulses(self, t, pos, vel, tout):
+        poshi = interpolate.interp1d(t, pos, kind='linear', assume_sorted=True, bounds_error=False,
+                                     fill_value=0.0)(tout)
+
+        outsampfreq = self.params['DAQ', 'Output', 'Sampling frequency']
+        stepsize = 360 / self.params['Motor parameters', 'Steps per revolution']
+        maxspeed = stepsize * outsampfreq / 2
+
+        if np.any(np.abs(vel) > maxspeed):
+            raise ValueError('Motion is too fast!')
+
+        motorstep = np.zeros_like(tout, dtype=np.uint8)
+        curpos = pos[0]
+        for i, cmdpos in enumerate(poshi, start=1):
+            if motorstep[i-1] == 1:
+                # can't step twice in a row
+                continue
+            elif abs(cmdpos - curpos) >= stepsize:
+                motorstep[i] = 1
+
+        motordirection = (vel <= 0).astype(np.uint8)
+
+        motorenable = np.ones_like(motordirection)
+        motorenable[-5:] = 0
+
+        self.motorpulses = motorstep
+        self.motordirection = motordirection
+
+        dig = np.packbits(np.column_stack((np.zeros((len(motorstep), 5), dtype=np.uint8),
+                                           motorenable,
+                                           motorstep,
+                                           motordirection)))
+        return dig
+
+    def make_motor_velocity_pulses(self, t, pos, vel, tout):
+
         velhi = interpolate.interp1d(t, vel, kind='linear', assume_sorted=True, bounds_error=False,
                                      fill_value=0.0)(tout)
 

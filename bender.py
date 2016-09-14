@@ -20,7 +20,7 @@ from bender_ui import Ui_BenderWindow
 from benderdaq import BenderDAQ
 from benderfile import BenderFile
 
-from settings import SETTINGS_FILE
+from settings import SETTINGS_FILE, MOTOR_TYPE
 
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
@@ -53,6 +53,18 @@ stimParameterDefs = {
     ]
 }
 
+velocityDriverParams = [
+    {'name': 'Maximum speed', 'type': 'float', 'value': 400.0, 'step': 50.0, 'suffix': 'RPM'},
+    {'name': 'Minimum pulse frequency', 'type': 'float', 'value': 1000.0, 'step': 100.0, 'siPrefix': True,
+     'suffix': 'Hz'},
+    {'name': 'Maximum pulse frequency', 'type': 'float', 'value': 5000.0, 'step': 100.0, 'siPrefix': True,
+     'suffix': 'Hz'},
+]
+
+stepperParams = [
+    {'name': 'Steps per revolution', 'type': 'float', 'value': 6400}
+]
+
 parameterDefinitions = [
     {'name': 'DAQ', 'type': 'group', 'children': [
         {'name': 'Input', 'type': 'group', 'children': [
@@ -78,13 +90,8 @@ parameterDefinitions = [
         ]},
         {'name': 'Update rate', 'type': 'float', 'value': 10.0, 'suffix': 'Hz'}
     ]},
-    {'name': 'Motor parameters', 'type': 'group', 'children': [
-        {'name': 'Maximum speed', 'type': 'float', 'value': 400.0, 'step': 50.0, 'suffix': 'RPM'},
-        {'name': 'Minimum pulse frequency', 'type': 'float', 'value': 1000.0, 'step': 100.0, 'siPrefix': True,
-         'suffix': 'Hz'},
-        {'name': 'Maximum pulse frequency', 'type': 'float', 'value': 5000.0, 'step': 100.0, 'siPrefix': True,
-         'suffix': 'Hz'},
-    ]},
+    {'name': 'Motor parameters', 'type': 'group', 'children':
+        stepperParams if MOTOR_TYPE == 'stepper' else velocityDriverParams},
     {'name': 'Geometry', 'type': 'group', 'children': [
         {'name': 'doutvert', 'tip': 'Vertical distance from transducer to center of pressure', 'type': 'float',
          'value': 0.011, 'step': 0.001, 'siPrefix': True, 'suffix': 'm'},
