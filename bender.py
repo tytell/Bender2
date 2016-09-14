@@ -177,6 +177,9 @@ class BenderWindow(QtGui.QMainWindow):
         self.params.child('DAQ', 'Update rate').sigValueChanged.connect(self.generateStimulus)
         if MOTOR_TYPE == 'velocity':
             self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.connect(self.updateOutputFrequency)
+        elif MOTOR_TYPE == 'stepper':
+            self.params.child('DAQ', 'Output', 'Sampling frequency').sigValueChanged.connect(self.generateStimulus)
+
         self.params.child('Motor parameters').sigTreeStateChanged.connect(self.generateStimulus)
         self.params.child('DAQ', 'Input', 'Get calibration...').sigActivated.connect(self.getCalibration)
 
@@ -188,6 +191,9 @@ class BenderWindow(QtGui.QMainWindow):
             if MOTOR_TYPE == 'velocity':
                 self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.disconnect(
                     self.updateOutputFrequency)
+            elif MOTOR_TYPE == 'stepper':
+                self.params.child('DAQ', 'Output', 'Sampling frequency').sigValueChanged.disconnect(self.generateStimulus)
+
             self.params.child('Motor parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
             self.params.child('DAQ', 'Input', 'Get calibration...').sigActivated.disconnect(self.getCalibration)
         except TypeError:
@@ -634,7 +640,7 @@ class BenderWindow(QtGui.QMainWindow):
             self.bender.make_stimulus(self.params)
         except ValueError as err:
             if showwarning:
-                QtGui.QMessageBox.warning(self, 'Warning', err.strerror)
+                QtGui.QMessageBox.warning(self, 'Warning', str(err))
             else:
                 raise
             return

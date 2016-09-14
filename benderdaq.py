@@ -2,6 +2,7 @@ from __future__ import print_function, unicode_literals
 import sys
 import os
 import string
+import time
 import logging
 import numpy as np
 from scipy import integrate, interpolate
@@ -122,7 +123,7 @@ class BenderDAQ(QtCore.QObject):
             Ractcmd = Ractcmd * stim['Activation','Right voltage'] / stim['Activation','Right voltage scale']
 
         # upsample analog out
-        tout = np.arange(0, dur, 1 / self.params['DAQ', 'Output', 'Sampling frequency']) + t[0]
+        tout = np.arange(0, dur, 1.0 / self.params['DAQ', 'Output', 'Sampling frequency']) + t[0]
 
         Lacthi = interpolate.interp1d(t, Lactcmd, kind='linear', assume_sorted=True, bounds_error=False,
                                       fill_value=0.0)(tout)
@@ -231,7 +232,7 @@ class BenderDAQ(QtCore.QObject):
         np.place(vel, isramp, velend)
         np.place(vel, isramp, ramp)
 
-        tout = np.arange(t[0], dur, 1 / self.params['DAQ', 'Output', 'Sampling frequency'])
+        tout = np.arange(t[0], dur, 1.0 / self.params['DAQ', 'Output', 'Sampling frequency'])
 
         self.digital_out_data = self.make_motor_pulses(t, vel, tout)
 
@@ -253,30 +254,26 @@ class BenderDAQ(QtCore.QObject):
     def make_motor_stepper_pulses(self, t, pos, vel, tout):
         poshi = interpolate.interp1d(t, pos, kind='linear', assume_sorted=True, bounds_error=False,
                                      fill_value=0.0)(tout)
+        velhi = interpolate.interp1d(t, vel, kind='linear', assume_sorted=True, bounds_error=False,
+                                     fill_value=0.0)(tout)
 
         outsampfreq = self.params['DAQ', 'Output', 'Sampling frequency']
-        stepsize = 360 / self.params['Motor parameters', 'Steps per revolution']
+        stepsperrev = self.params['Motor parameters', 'Steps per revolution']
+        if outsampfreq == 0 or stepsperrev == 0:
+            raise ValueError('Problems with parameters')
+
+        stepsize = 360.0 / stepsperrev
         maxspeed = stepsize * outsampfreq / 2
 
         if np.any(np.abs(vel) > maxspeed):
             raise ValueError('Motion is too fast!')
 
-        motorstep = np.zeros_like(tout, dtype=np.uint8)
-        motordirection = np.zeros_like(tout, dtype=np.uint8)
-        curpos = pos[0]
-        for i, cmdpos in enumerate(poshi, start=1):
-            motordirection[i] = motordirection[i-1]
-            if motorstep[i-1] == 1:
-                # can't step twice in a row
-                continue
-            elif cmdpos - curpos >= stepsize:
-                motorstep[i] = 1
-                motordirection[i] = 0
-            elif cmdpos - curpos <= -stepsize:
-                motorstep[i] = 1
-                motordirection[i] = 1
+        stepnum = np.floor(poshi / stepsize)
+        dstep = np.diff(stepnum)
+        motorstep = np.concatenate((np.array([0], dtype='uint8'), (dstep != 0).astype('uint8')))
+        motordirection = (velhi <= 0).astype('uint8')
 
-        motorenable = np.ones_like(motordirection)
+        motorenable = np.ones_like(motordirection, dtype='uint8')
         motorenable[-5:] = 0
 
         self.motorpulses = motorstep
