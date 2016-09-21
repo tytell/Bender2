@@ -202,7 +202,8 @@ class BenderWindow(QtGui.QMainWindow):
 
     def startAcquisition(self):
         if self.calibration is None or self.calibration.size == 0:
-            ret = QtGui.QMessageBox.warning(self, "You need to have a calibration!", buttons=QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel,
+            ret = QtGui.QMessageBox.warning(self, "You need to have a calibration!", "Warning",
+                                            buttons=QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel,
                                             defaultButton=QtGui.QMessageBox.Ok)
             if ret == QtGui.QMessageBox.Cancel:
                 return

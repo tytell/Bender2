@@ -12,7 +12,7 @@ from PyQt4 import QtCore
 try:
     import PyDAQmx as daq
 except ImportError:
-    pass
+    import FakeDAQ as daq
 
 from settings import SETTINGS_FILE, MOTOR_TYPE
 
