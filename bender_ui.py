@@ -115,8 +115,8 @@ class Ui_BenderWindow(object):
         self.plotSplitter.setObjectName(_fromUtf8("plotSplitter"))
         self.plot1Widget = PlotWidget(self.plotSplitter)
         self.plot1Widget.setObjectName(_fromUtf8("plot1Widget"))
-        self.plot2Widget = PlotWidget(self.plotSplitter)
-        self.plot2Widget.setObjectName(_fromUtf8("plot2Widget"))
+        self.plot2Layout = GraphicsLayoutWidget(self.plotSplitter)
+        self.plot2Layout.setObjectName(_fromUtf8("plot2Layout"))
         self.verticalLayout_2.addWidget(self.plotSplitter)
         self.gridLayout_2 = QtGui.QGridLayout()
         self.gridLayout_2.setObjectName(_fromUtf8("gridLayout_2"))
@@ -183,15 +183,5 @@ class Ui_BenderWindow(object):
         self.label_5.setText(_translate("BenderWindow", "Y axis", None))
         self.label_6.setText(_translate("BenderWindow", "Channels", None))
 
-from pyqtgraph import PlotWidget
+from pyqtgraph import GraphicsLayoutWidget, PlotWidget
 from pyqtgraph.parametertree import ParameterTree
-
-if __name__ == "__main__":
-    import sys
-    app = QtGui.QApplication(sys.argv)
-    BenderWindow = QtGui.QMainWindow()
-    ui = Ui_BenderWindow()
-    ui.setupUi(BenderWindow)
-    BenderWindow.show()
-    sys.exit(app.exec_())
-

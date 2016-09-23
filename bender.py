@@ -137,6 +137,7 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.fileNamePatternEdit.editingFinished.connect(self.updateFileName)
         self.ui.nextFileNumberBox.valueChanged.connect(self.updateFileName)
         self.ui.restartNumberingButton.clicked.connect(self.restartNumbering)
+        self.ui.channelOverlayCombo.currentIndexChanged.connect(self.changeChannelOverlay)
 
         self.ui.saveParametersButton.clicked.connect(self.saveParams)
         self.ui.loadParametersButton.clicked.connect(self.loadParams)
@@ -144,7 +145,8 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.plot1Widget.setLabel('left', "Angle", units='deg')
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
 
-        self.plotWidgets = [self.ui.plot2Widget]
+        plotwidget = self.ui.plot2Layout.addPlot()
+        self.plots = [plotwidget]
 
         self.bender = BenderDAQ()
         self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
@@ -190,25 +192,27 @@ class BenderWindow(QtGui.QMainWindow):
             logging.warning('Problem disconnecting parameter slots')
             pass
 
+    def changeChannelOverlay(self, index):
+        self.setupChannels()
+
     def setupChannels(self):
         if self.ui.channelOverlayCombo.currentIndex() == 0:
-            for widget in self.plotWidgets[1:]:
-                widget.setParent(None)
-                widget.deleteLater()
-            self.plotWidgets = [self.ui.plot2Widget]
+            for plotwidget in self.plots[1:]:
+                self.ui.plot2Layout.removeItem(plotwidget)
+
         elif self.ui.channelOverlayCombo.currentIndex() == 1:
-            channels = self.params.child('DAQ', 'Input', 'Channels').children
-            if len(self.plotWidgets) != len(channels):
-                for _ in range(len(self.plotWidgets), len(channels)):
-                    pw = pg.PlotWidget()
-                    self.ui.plotSplitter.addWidget(pw)
-                    self.plotWidgets.append(pw)
+            channels = self.params.child('DAQ', 'Input', 'Channels').children()
+            if len(self.plots) != len(channels):
+                for _ in range(len(self.plots), len(channels)):
+                    self.ui.plot2Layout.nextRow()
+                    pw = self.ui.plot2Layout.addPlot()
+                    self.plots.append(pw)
 
-                for pw, chan in zip(self.plotWidgets, channels):
-                    pw.setLabel('left', chan['Name'], units='V')
-                    pw.setLabel('bottom','')
+                for pw, chan in zip(self.plots, channels):
+                    pw.setLabel('left', chan.name(), units='V')
 
-
+                for pw in self.plots[:-1]:
+                    pw.hideAxis('bottom')
 
     def startAcquisition(self):
         self.ui.goButton.setText('Abort')
@@ -620,10 +624,10 @@ class BenderWindow(QtGui.QMainWindow):
             for onoff in self.bender.Ronoff:
                 self.ui.plot1Widget.addItem(pg.LinearRegionItem(onoff, movable=False, brush=Rbrush))
 
-            self.ui.plot2Widget.plot(x=self.bender.tout, y=self.bender.motorpulses, clear=True, pen='r')
-            self.ui.plot2Widget.plot(x=self.bender.tout, y=self.bender.motordirection, pen='b')
+            self.plots[0].plot(x=self.bender.tout, y=self.bender.motorpulses, clear=True, pen='r')
+            self.plots[0].plot(x=self.bender.tout, y=self.bender.motordirection, pen='b')
 
-            self.ui.plot2Widget.setXLink(self.ui.plot1Widget)
+            self.plots[0].setXLink(self.ui.plot1Widget)
 
             self.updateFileName()
 
@@ -741,6 +745,7 @@ class BenderWindow(QtGui.QMainWindow):
                 self.curStimType = stimtype
 
             self.readParameters(settings, self.params)
+            self.readChannels(settings)
         finally:
             self.connectParameterSlots()
 
@@ -807,6 +812,20 @@ class BenderWindow(QtGui.QMainWindow):
                 elif ch.type() in ['str', 'list']:
                     if settings.contains(ch.name()):
                         ch.setValue(str(settings.value(ch.name()).toString()))
+
+    def readChannels(self, settings):
+        settings.beginGroup('DAQ/Input/Channels')
+        chansettings = settings.childKeys()
+
+        channelgroup = self.params.child('DAQ', 'Input', 'Channels')
+        for i in range(chansettings.count()):
+            hwchan = str(chansettings[i])
+            if hwchan == 'Expanded':
+                continue
+            channelgroup.addChild(
+                dict(name=hwchan, type='str', value=str(settings.value(hwchan).toString()),
+                     removable=True, renamable=True))
+        settings.endGroup()
 
     def closeEvent(self, event):
         self.writeSettings()

@@ -187,7 +187,7 @@
            <enum>Qt::Vertical</enum>
           </property>
           <widget class="PlotWidget" name="plot1Widget"/>
-          <widget class="PlotWidget" name="plot2Widget"/>
+          <widget class="GraphicsLayoutWidget" name="plot2Layout"/>
          </widget>
         </item>
         <item>
@@ -283,6 +283,11 @@
   </customwidget>
   <customwidget>
    <class>PlotWidget</class>
+   <extends>QGraphicsView</extends>
+   <header>pyqtgraph</header>
+  </customwidget>
+  <customwidget>
+   <class>GraphicsLayoutWidget</class>
    <extends>QGraphicsView</extends>
    <header>pyqtgraph</header>
   </customwidget>
