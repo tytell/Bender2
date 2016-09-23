@@ -26,6 +26,19 @@ pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 
 
+class ChannelGroup(pTypes.GroupParameter):
+    def __init__(self, **opts):
+        opts['type'] = 'group'
+        opts['addText'] = "Add channel"
+        pTypes.GroupParameter.__init__(self, **opts)
+
+    def addNew(self):
+        newname = "Channel {}".format(len(self.childs)+1)
+        hwchan = "ai{}".format(len(self.childs))
+
+        self.addChild(
+            dict(name=hwchan, type='str', value=newname, removable=True, renamable=True))
+
 stimParameterDefs = {
     'Sine': [
         {'name': 'Amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'deg'},
@@ -70,42 +83,19 @@ parameterDefinitions = [
         {'name': 'Input', 'type': 'group', 'children': [
             {'name': 'Sampling frequency', 'type': 'float', 'value': 1000.0, 'step': 500.0, 'siPrefix': True,
              'suffix': 'Hz'},
-            {'name': 'xForce', 'type': 'str', 'value': 'Dev1/ai0'},
-            {'name': 'yForce', 'type': 'str', 'value': 'Dev1/ai1'},
-            {'name': 'zForce', 'type': 'str', 'value': 'Dev1/ai2'},
-            {'name': 'xTorque', 'type': 'str', 'value': 'Dev1/ai3'},
-            {'name': 'yTorque', 'type': 'str', 'value': 'Dev1/ai4'},
-            {'name': 'zTorque', 'type': 'str', 'value': 'Dev1/ai5'},
-            {'name': 'Get calibration...', 'type': 'action'},
-            {'name': 'Calibration file', 'type': 'str', 'readonly': True},
+            ChannelGroup(name="Channels", children=[]),
             {'name': 'Encoder', 'type': 'str', 'value': 'Dev1/ctr0'},
             {'name': 'Counts per revolution', 'type': 'int', 'value': 10000, 'limits': (1, 100000)}
         ]},
         {'name': 'Output', 'type': 'group', 'children': [
             {'name': 'Sampling frequency', 'type': 'float', 'value': 10000.0, 'step': 1000.0, 'siPrefix': True,
              'suffix': 'Hz', 'readonly': True},
-            {'name': 'Left stimulus', 'type': 'str', 'value': 'Dev1/ao0'},
-            {'name': 'Right stimulus', 'type': 'str', 'value': 'Dev1/ao1'},
             {'name': 'Digital port', 'type': 'str', 'value': 'Dev1/port0'}
         ]},
         {'name': 'Update rate', 'type': 'float', 'value': 10.0, 'suffix': 'Hz'}
     ]},
     {'name': 'Motor parameters', 'type': 'group', 'children':
         stepperParams if MOTOR_TYPE == 'stepper' else velocityDriverParams},
-    {'name': 'Geometry', 'type': 'group', 'children': [
-        {'name': 'doutvert', 'tip': 'Vertical distance from transducer to center of pressure', 'type': 'float',
-         'value': 0.011, 'step': 0.001, 'siPrefix': True, 'suffix': 'm'},
-        {'name': 'douthoriz', 'tip': 'Horizontal distance from transducer to center of pressure', 'type': 'float',
-         'value': 0.0, 'step': 0.001, 'siPrefix': True, 'suffix': 'm'},
-        {'name': 'din', 'tip': 'Horizontal distance from center of pressure to center of rotation', 'type': 'float',
-         'value': 0.035, 'step': 0.001, 'siPrefix': True, 'suffix': 'm'},
-        {'name': 'dclamp', 'tip': 'Horizontal distance between the edges of the clamps', 'type': 'float',
-         'value': 0.030, 'step': 0.001, 'siPrefix': True, 'suffix': 'm'},
-        {'name': 'Cross-section', 'type': 'group', 'children': [
-            {'name': 'width', 'type': 'float', 'value': 0.021, 'step': 0.001, 'siPrefix': True, 'suffix': 'm'},
-            {'name': 'height', 'type': 'float', 'value': 0.021, 'step': 0.001, 'siPrefix': True, 'suffix': 'm'},
-        ]}
-    ]},
     {'name': 'Stimulus', 'type': 'group', 'children': [
         {'name': 'Type', 'type': 'list', 'values': ['Sine', 'Frequency Sweep'], 'value': 'Sine'},
         {'name': 'Parameters', 'type': 'group', 'children': stimParameterDefs['Sine']},
@@ -141,7 +131,6 @@ class BenderWindow(QtGui.QMainWindow):
 
         self.stimParamState = dict()
 
-        self.calibration = None
         self.filter = None
 
         self.ui.browseOutputPathButton.clicked.connect(self.browseOutputPath)
@@ -155,6 +144,8 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.plot1Widget.setLabel('left', "Angle", units='deg')
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
 
+        self.plotWidgets = [self.ui.plot2Widget]
+
         self.bender = BenderDAQ()
         self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
         self.bender.sigDoneAcquiring.connect(self.endAcquisition)
@@ -165,6 +156,7 @@ class BenderWindow(QtGui.QMainWindow):
         self.activationPlot2 = None
 
         self.readSettings()
+        self.setupChannels()
 
     def initUI(self):
         ui = Ui_BenderWindow()
@@ -181,7 +173,6 @@ class BenderWindow(QtGui.QMainWindow):
             self.params.child('DAQ', 'Output', 'Sampling frequency').sigValueChanged.connect(self.generateStimulus)
 
         self.params.child('Motor parameters').sigTreeStateChanged.connect(self.generateStimulus)
-        self.params.child('DAQ', 'Input', 'Get calibration...').sigActivated.connect(self.getCalibration)
 
     def disconnectParameterSlots(self):
         try:
@@ -195,25 +186,34 @@ class BenderWindow(QtGui.QMainWindow):
                 self.params.child('DAQ', 'Output', 'Sampling frequency').sigValueChanged.disconnect(self.generateStimulus)
 
             self.params.child('Motor parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
-            self.params.child('DAQ', 'Input', 'Get calibration...').sigActivated.disconnect(self.getCalibration)
         except TypeError:
             logging.warning('Problem disconnecting parameter slots')
             pass
 
-    def startAcquisition(self):
-        if self.calibration is None or self.calibration.size == 0:
-            ret = QtGui.QMessageBox.warning(self, "You need to have a calibration!", "Warning",
-                                            buttons=QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel,
-                                            defaultButton=QtGui.QMessageBox.Ok)
-            if ret == QtGui.QMessageBox.Cancel:
-                return
-            self.getCalibration()
+    def setupChannels(self):
+        if self.ui.channelOverlayCombo.currentIndex() == 0:
+            for widget in self.plotWidgets[1:]:
+                widget.setParent(None)
+                widget.deleteLater()
+            self.plotWidgets = [self.ui.plot2Widget]
+        elif self.ui.channelOverlayCombo.currentIndex() == 1:
+            channels = self.params.child('DAQ', 'Input', 'Channels').children
+            if len(self.plotWidgets) != len(channels):
+                for _ in range(len(self.plotWidgets), len(channels)):
+                    pw = pg.PlotWidget()
+                    self.ui.plotSplitter.addWidget(pw)
+                    self.plotWidgets.append(pw)
 
+                for pw, chan in zip(self.plotWidgets, channels):
+                    pw.setLabel('left', chan['Name'], units='V')
+                    pw.setLabel('bottom','')
+
+
+
+    def startAcquisition(self):
         self.ui.goButton.setText('Abort')
         self.ui.goButton.clicked.disconnect(self.startAcquisition)
         self.ui.goButton.clicked.connect(self.bender.abort)
-
-        self.ui.overlayCheck.setChecked(False)
 
         pattern = self.ui.fileNamePatternEdit.text()
         filename = self.getFileName(pattern)
@@ -260,7 +260,7 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.goButton.clicked.disconnect(self.bender.abort)
         self.ui.goButton.clicked.connect(self.startAcquisition)
 
-        self.data0 = np.dot(self.bender.analog_in_data, self.calibration)
+        self.data0 = self.bender.analog_in_data
         self.data = self.filterData()
 
         self.updatePlot()
@@ -270,7 +270,6 @@ class BenderWindow(QtGui.QMainWindow):
         with BenderFile(os.path.join(filepath, filename + '.h5'), allowoverwrite=True) as benderFile:
             benderFile.setupFile(self.bender, self.params)
             benderFile.saveRawData(self.bender.analog_in_data, self.bender.encoder_in_data, self.params)
-            benderFile.saveCalibratedData(self.data, self.calibration, self.params)
 
         self.ui.nextFileNumberBox.setValue(self.ui.nextFileNumberBox.value() + 1)
 
@@ -584,42 +583,6 @@ class BenderWindow(QtGui.QMainWindow):
         if outputPath:
             self.ui.outputPathEdit.setText(outputPath)
 
-    def getCalibration(self):
-        calibrationFile = self.params['DAQ', 'Input', 'Calibration file']
-        if not calibrationFile:
-            calibrationFile = QtCore.QString()
-        calibrationFile = QtGui.QFileDialog.getOpenFileName(self, "Choose calibration file", directory=calibrationFile,
-                                                            filter="*.cal")
-        if calibrationFile:
-            self.params['DAQ', 'Input', 'Calibration file'] = calibrationFile
-
-            self.loadCalibration()
-
-    def loadCalibration(self):
-        calibrationFile = self.params['DAQ', 'Input', 'Calibration file']
-        if not calibrationFile:
-            return
-        if not os.path.exists(calibrationFile):
-            raise IOError("Calibration file %s not found", calibrationFile)
-
-        try:
-            tree = ElementTree.parse(calibrationFile)
-            cal = tree.getroot().find('Calibration')
-            if cal is None:
-                raise IOError('Not a calibration XML file')
-
-            mat = []
-            for ax in cal.findall('UserAxis'):
-                txt = ax.get('values')
-                row = [float(v) for v in txt.split()]
-                mat.append(row)
-
-        except IOError:
-            logging.warning('Bad calibration file')
-            return
-
-        self.calibration = np.array(mat).T
-
     def changeStimType(self, param, value):
         stimParamGroup = self.params.child('Stimulus', 'Parameters')
         self.stimParamState[self.curStimType] = stimParamGroup.saveState()
@@ -787,8 +750,6 @@ class BenderWindow(QtGui.QMainWindow):
             self.updateOutputFrequency()
             self.generateStimulus(showwarning=False)
             self.updateFileName()
-
-            self.loadCalibration()
         except ValueError:
             # skip over problems with the settings
             pass

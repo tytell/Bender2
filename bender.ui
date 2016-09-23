@@ -6,15 +6,15 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>737</width>
-    <height>694</height>
+    <width>851</width>
+    <height>603</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Bender</string>
+   <string>MainWindow</string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <layout class="QVBoxLayout" name="verticalLayout_2" stretch="0,100">
+   <layout class="QVBoxLayout" name="verticalLayout_3">
     <item>
      <layout class="QHBoxLayout" name="horizontalLayout">
       <item>
@@ -179,309 +179,95 @@
         </item>
        </layout>
       </widget>
-      <widget class="QSplitter" name="plotSplitter">
-       <property name="orientation">
-        <enum>Qt::Vertical</enum>
-       </property>
-       <widget class="PlotWidget" name="plot1Widget"/>
-       <widget class="QWidget" name="verticalLayoutWidget_2">
-        <layout class="QVBoxLayout" name="verticalLayout_3">
-         <item>
-          <layout class="QHBoxLayout" name="horizontalLayout_3">
-           <item>
-            <widget class="QComboBox" name="plotYBox">
-             <item>
-              <property name="text">
-               <string>X torque</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Y force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Body torque from X torque</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Body torque from Y force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>X force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Y force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Z force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Z torque</string>
-              </property>
-             </item>
-            </widget>
-           </item>
-           <item>
-            <widget class="QLabel" name="label_4">
+      <widget class="QWidget" name="layoutWidget">
+       <layout class="QVBoxLayout" name="verticalLayout_2">
+        <item>
+         <widget class="QSplitter" name="plotSplitter">
+          <property name="orientation">
+           <enum>Qt::Vertical</enum>
+          </property>
+          <widget class="PlotWidget" name="plot1Widget"/>
+          <widget class="PlotWidget" name="plot2Widget"/>
+         </widget>
+        </item>
+        <item>
+         <layout class="QGridLayout" name="gridLayout_2">
+          <item row="1" column="2">
+           <widget class="QComboBox" name="yAxisCombo">
+            <item>
              <property name="text">
-              <string>vs.</string>
+              <string>Raw data</string>
              </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QComboBox" name="plotXBox">
-             <item>
-              <property name="text">
-               <string>Time (sec)</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Time (cycles)</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Phase</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Angle</string>
-              </property>
-             </item>
-            </widget>
-           </item>
-           <item>
-            <spacer name="horizontalSpacer_3">
-             <property name="orientation">
-              <enum>Qt::Horizontal</enum>
-             </property>
-             <property name="sizeHint" stdset="0">
-              <size>
-               <width>40</width>
-               <height>20</height>
-              </size>
-             </property>
-            </spacer>
-           </item>
-           <item>
-            <widget class="QLabel" name="label_5">
+            </item>
+            <item>
              <property name="text">
-              <string>Color by</string>
+              <string>Raster plot</string>
              </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QComboBox" name="colorByBox">
-             <item>
-              <property name="text">
-               <string>None</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Active/passive</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Cycle number</string>
-              </property>
-             </item>
-            </widget>
-           </item>
-          </layout>
-         </item>
-         <item>
-          <layout class="QHBoxLayout" name="horizontalLayout_4">
-           <item>
-            <widget class="QCheckBox" name="overlayCheck">
+            </item>
+            <item>
+             <property name="text">
+              <string>Phase</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+          <item row="1" column="3">
+           <widget class="QComboBox" name="channelOverlayCombo">
+            <item>
              <property name="text">
               <string>Overlay</string>
              </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QComboBox" name="plotYOverlayBox">
-             <item>
-              <property name="text">
-               <string>X torque</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Y force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>X force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Y force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Z force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Z torque</string>
-              </property>
-             </item>
-            </widget>
-           </item>
-           <item>
-            <widget class="QLabel" name="label_6">
+            </item>
+            <item>
              <property name="text">
-              <string>from</string>
+              <string>Stack</string>
              </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QComboBox" name="overlayFromBox">
-             <item>
-              <property name="text">
-               <string>Current file</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Other file...</string>
-              </property>
-             </item>
-            </widget>
-           </item>
-           <item>
-            <spacer name="horizontalSpacer_4">
-             <property name="orientation">
-              <enum>Qt::Horizontal</enum>
-             </property>
-             <property name="sizeHint" stdset="0">
-              <size>
-               <width>40</width>
-               <height>20</height>
-              </size>
-             </property>
-            </spacer>
-           </item>
-           <item>
-            <widget class="QLabel" name="label_7">
+            </item>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QComboBox" name="xAxisCombo">
+            <item>
              <property name="text">
-              <string>Color</string>
+              <string>Time</string>
              </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QComboBox" name="overlayColorBox">
-             <item>
-              <property name="text">
-               <string>Red</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Blue</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Green</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Black</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Dark red</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Dark blue</string>
-              </property>
-             </item>
-            </widget>
-           </item>
-          </layout>
-         </item>
-         <item>
-          <layout class="QHBoxLayout" name="horizontalLayout_5">
-           <item>
-            <widget class="QCheckBox" name="filterCheck">
+            </item>
+            <item>
              <property name="text">
-              <string>Filter</string>
+              <string>Phase</string>
              </property>
-             <property name="checked">
-              <bool>true</bool>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QLabel" name="label_8">
+            </item>
+            <item>
              <property name="text">
-              <string>Cutoff</string>
+              <string>Cycles</string>
              </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QDoubleSpinBox" name="filterCutoffBox">
-             <property name="suffix">
-              <string>Hz</string>
-             </property>
-             <property name="decimals">
-              <number>0</number>
-             </property>
-             <property name="maximum">
-              <double>500.000000000000000</double>
-             </property>
-             <property name="singleStep">
-              <double>10.000000000000000</double>
-             </property>
-             <property name="value">
-              <double>20.000000000000000</double>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <spacer name="horizontalSpacer_5">
-             <property name="orientation">
-              <enum>Qt::Horizontal</enum>
-             </property>
-             <property name="sizeHint" stdset="0">
-              <size>
-               <width>40</width>
-               <height>20</height>
-              </size>
-             </property>
-            </spacer>
-           </item>
-          </layout>
-         </item>
-         <item>
-          <widget class="PlotWidget" name="plot2Widget"/>
-         </item>
-        </layout>
-       </widget>
+            </item>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLabel" name="label_4">
+            <property name="text">
+             <string>X axis</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="2">
+           <widget class="QLabel" name="label_5">
+            <property name="text">
+             <string>Y axis</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="3">
+           <widget class="QLabel" name="label_6">
+            <property name="text">
+             <string>Channels</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+       </layout>
       </widget>
      </widget>
     </item>
