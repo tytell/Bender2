@@ -8,13 +8,6 @@ import numpy as np
 from scipy import integrate, interpolate
 
 class BenderFile(object):
-    datasetNames = {'X force': 'xForce',
-                    'Y force': 'yForce',
-                    'Z force': 'zForce',
-                    'X torque': 'xTorque',
-                    'Y torque': 'yTorque',
-                    'Z torque': 'zTorque'}
-
     def __init__(self, filename, allowoverwrite=False):
         if not allowoverwrite and os.path.exists(filename):
             raise IOError('File exists')
@@ -37,52 +30,35 @@ class BenderFile(object):
         gin = self.h5file.create_group('RawInput')
         gin.attrs['SampleFrequency'] = params['DAQ', 'Input', 'Sampling frequency']
 
-        gcal = self.h5file.create_group('Calibrated')
-
         # save the output data
         gout = self.h5file.create_group('Output')
         gout.attrs['SampleFrequency'] = params['DAQ', 'Output', 'Sampling frequency']
-
-        dset = gout.create_dataset('Lact', data=bender.Lact)
-        dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Left stimulus']
-        try:
-            dset.attrs['VoltScale'] = params['Stimulus', 'Parameters', 'Activation', 'Left voltage scale']
-        except KeyError:
-            pass
-
-        dset = gout.create_dataset('Ract', data=bender.Ract)
-        dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Right stimulus']
-        try:
-            dset.attrs['VoltScale'] = params['Stimulus', 'Parameters', 'Activation', 'Right voltage scale']
-        except KeyError:
-            pass
 
         dset = gout.create_dataset('DigitalOut', data=bender.digital_out_data)
         dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Digital port']
 
         # save the parameters for generating the stimulus
         gout = self.h5file.create_group('NominalStimulus')
-        gout.create_dataset('Position', data=bender.pos)
-        gout.create_dataset('Velocity', data=bender.vel)
+        gout.create_dataset('RostralPosition', data=bender.pos1)
+        gout.create_dataset('RostralVelocity', data=bender.vel1)
+        gout.create_dataset('CaudalPosition', data=bender.pos2)
+        gout.create_dataset('CaudalVelocity', data=bender.vel2)
         gout.create_dataset('Phase', data=bender.phase)
         gout.create_dataset('t', data=bender.t)
         gout.create_dataset('tnorm', data=bender.tnorm)
 
         stim = params.child('Stimulus', 'Parameters')
         if params['Stimulus', 'Type'] == 'Sine':
-            gout.attrs['Amplitude'] = stim['Amplitude']
+            gout.attrs['RostralAmplitude'] = stim['Rostral amplitude']
+            gout.attrs['CaudalAmplitude'] = stim['Caudal amplitude']
             gout.attrs['Frequency'] = stim['Frequency']
+            gout.attrs['BasePhaseOffset'] = stim['Base phase offset']
+            gout.attrs['AddPhaseOffset'] = stim['Additional phase offset']
             gout.attrs['Cycles'] = stim['Cycles']
             gout.attrs['WaitPre'] = params['Stimulus', 'Wait before']
             gout.attrs['WaitPost'] = params['Stimulus', 'Wait after']
+            gout.attrs['RampDuration'] = params['Stimulus', 'Ramp duration']
 
-            gout.attrs['ActivationOn'] = stim['Activation', 'On']
-            gout.attrs['ActivationDuty'] = stim['Activation', 'Duty']
-            gout.attrs['ActivationStartPhase'] = stim['Activation', 'Phase']
-            gout.attrs['ActivationStartCycle'] = stim['Activation', 'Start cycle']
-            gout.attrs['ActivationPulseFreq'] = stim['Activation', 'Pulse rate']
-            gout.attrs['Left voltage'] = stim['Activation', 'Left voltage']
-            gout.attrs['Right voltage'] = stim['Activation', 'Right voltage']
         elif params['Stimulus', 'Type'] == 'Frequency Sweep':
             gout.attrs['Amplitude'] = stim['Amplitude']
             gout.attrs['StartFrequency'] = stim['Start frequency']
@@ -100,21 +76,16 @@ class BenderFile(object):
     def saveRawData(self, aidata, encdata, params):
         gin = self.h5file.require_group('RawInput')
 
-        for i, aichan in enumerate(['xForce', 'yForce', 'zForce', 'xTorque', 'yTorque', 'zTorque']):
-            dset = gin.create_dataset(aichan, data=aidata[:, i])
-            dset.attrs['HardwareChannel'] = params['DAQ', 'Input', aichan]
+        channels = params.child('DAQ', 'Input', 'Channels').children()
+
+        for i, chan1 in enumerate(channels):
+            logging.debug('chan1.name() = {}, chan1.value() = {}'.format(chan1.name(), chan1.value()))
+            dset = gin.create_dataset(chan1.value(), data=aidata[:, i])
+            dset.attrs['HardwareChannel'] = chan1.name()
 
         dset = gin.create_dataset('Encoder', data=encdata)
         dset.attrs['HardwareChannel'] = params['DAQ', 'Input', 'Encoder']
         dset.attrs['CountsPerRev'] = params['DAQ', 'Input', 'Counts per revolution']
-
-    def saveCalibratedData(self, data, calibration, params):
-        gin = self.h5file.require_group('Calibrated')
-
-        for i, aichan in enumerate(['xForce', 'yForce', 'zForce', 'xTorque', 'yTorque', 'zTorque']):
-            dset = gin.create_dataset(aichan, data=data[:, i])
-
-        gin.create_dataset('CalibrationMatrix', data=calibration)
 
     def close(self):
         self.h5file.close()

@@ -4,6 +4,7 @@ import os
 import string
 import logging
 from PyQt4 import QtGui, QtCore
+from itertools import cycle
 import xml.etree.ElementTree as ElementTree
 import pickle
 import numpy as np
@@ -14,6 +15,8 @@ from copy import copy
 import pyqtgraph.parametertree.parameterTypes as pTypes
 from pyqtgraph.parametertree import Parameter, ParameterTree, ParameterItem, registerParameterType
 import pyqtgraph as pg
+
+from detect_peaks import detect_peaks
 
 from bender_ui import Ui_BenderWindow
 
@@ -41,20 +44,13 @@ class ChannelGroup(pTypes.GroupParameter):
 
 stimParameterDefs = {
     'Sine': [
-        {'name': 'Amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'deg'},
+        {'name': 'Caudal amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'deg'},
+        {'name': 'Rostral amplitude', 'type': 'float', 'value': 15.0, 'step':1.0, 'suffix': 'deg'},
+        {'name': 'Distance between', 'type': 'int', 'value': 20, 'step': 1, 'suffix': 'seg'},
+        {'name': 'Base phase offset', 'type': 'float', 'value': 0.0, 'readonly': True},
+        {'name': 'Additional phase offset', 'type': 'float', 'value': 0.0},
         {'name': 'Frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
         {'name': 'Cycles', 'type': 'int', 'value': 10},
-        {'name': 'Activation', 'type': 'group', 'children': [
-            {'name': 'On', 'type': 'bool', 'value': True},
-            {'name': 'Start cycle', 'type': 'int', 'value': 3},
-            {'name': 'Phase', 'type': 'float', 'value': 0.0, 'step': 10.0, 'suffix': '%'},
-            {'name': 'Duty', 'type': 'float', 'value': 30.0, 'step': 10.0, 'suffix': '%'},
-            {'name': 'Left voltage', 'type': 'float', 'value': 2.0, 'step': 1.0, 'suffix': 'V'},
-            {'name': 'Left voltage scale', 'type': 'float', 'value': 1.0, 'step': 1.0, 'suffix': 'V/V'},
-            {'name': 'Right voltage', 'type': 'float', 'value': 2.0, 'step': 1.0, 'suffix': 'V'},
-            {'name': 'Right voltage scale', 'type': 'float', 'value': 0.4, 'step': 1.0, 'suffix': 'V/V'},
-            {'name': 'Pulse rate', 'type': 'float', 'value': 75.0, 'step': 5.0, 'suffix': 'Hz'},
-        ]}
     ],
     'Frequency Sweep': [
         {'name': 'Start frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
@@ -99,10 +95,20 @@ parameterDefinitions = [
     {'name': 'Stimulus', 'type': 'group', 'children': [
         {'name': 'Type', 'type': 'list', 'values': ['Sine', 'Frequency Sweep'], 'value': 'Sine'},
         {'name': 'Parameters', 'type': 'group', 'children': stimParameterDefs['Sine']},
+        {'name': 'Ramp duration', 'type': 'float', 'value': 0.5, 'suffix': 's'},
         {'name': 'Wait before', 'type': 'float', 'value': 1.0, 'suffix': 's'},
         {'name': 'Wait after', 'type': 'float', 'value': 1.0, 'suffix': 's'},
     ]}
 ]
+
+
+class RasterGroup(pg.VTickGroup):
+    def __init__(self, xvals=None, yrange=None, pen=None):
+        pg.VTickGroup.__init__(self, xvals, yrange, pen)
+
+    def setData(self, x, y):
+        pg.VTickGroup.setXVals(self, vals=x)
+        # ignore y
 
 
 class BenderWindow(QtGui.QMainWindow):
@@ -112,6 +118,8 @@ class BenderWindow(QtGui.QMainWindow):
                  'Y torque': 4,
                  'Z force': 2,
                  'Z torque': 5}
+    penOrder = ['k', 'b', 'g', 'r']
+    markerOrder = ['o', 's', 't', 'd', '+']
 
     def __init__(self):
         super(BenderWindow, self).__init__()
@@ -137,7 +145,6 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.fileNamePatternEdit.editingFinished.connect(self.updateFileName)
         self.ui.nextFileNumberBox.valueChanged.connect(self.updateFileName)
         self.ui.restartNumberingButton.clicked.connect(self.restartNumbering)
-        self.ui.channelOverlayCombo.currentIndexChanged.connect(self.changeChannelOverlay)
 
         self.ui.saveParametersButton.clicked.connect(self.saveParams)
         self.ui.loadParametersButton.clicked.connect(self.loadParams)
@@ -145,8 +152,13 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.plot1Widget.setLabel('left', "Angle", units='deg')
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
 
-        plotwidget = self.ui.plot2Layout.addPlot()
-        self.plots = [plotwidget]
+        self.plotwidgets = []
+        self.plots = []
+        self.spikeplots = []
+        self.thresholdLines = []
+        self.spikeThreshold = None
+        self.nchannels = 0
+        self.ischanneloverlay = True
 
         self.bender = BenderDAQ()
         self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
@@ -157,8 +169,14 @@ class BenderWindow(QtGui.QMainWindow):
         self.workLabels = None
         self.activationPlot2 = None
 
+        self.t = np.array([])
+        self.data = np.array([])
+
         self.readSettings()
-        self.setupChannels()
+
+        self.ui.plotTypeCombo.currentIndexChanged.connect(self.changePlotType)
+        self.ui.spikeTypeCombo.currentIndexChanged.connect(self.changeSpikeType)
+        self.ui.channelOverlayCombo.currentIndexChanged.connect(self.changeChannelOverlay)
 
     def initUI(self):
         ui = Ui_BenderWindow()
@@ -168,6 +186,14 @@ class BenderWindow(QtGui.QMainWindow):
     def connectParameterSlots(self):
         self.params.child('Stimulus', 'Type').sigValueChanged.connect(self.changeStimType)
         self.params.child('Stimulus').sigTreeStateChanged.connect(self.generateStimulus)
+        try:
+            self.params.child('Stimulus', 'Parameters', 'Distance between').sigValueChanged.connect(self.updatePhaseOffset)
+        except Exception as exc:
+            if 'has no child named' in str(exc):
+                pass
+            else:
+                raise
+
         self.params.child('DAQ', 'Update rate').sigValueChanged.connect(self.generateStimulus)
         if MOTOR_TYPE == 'velocity':
             self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.connect(self.updateOutputFrequency)
@@ -175,11 +201,21 @@ class BenderWindow(QtGui.QMainWindow):
             self.params.child('DAQ', 'Output', 'Sampling frequency').sigValueChanged.connect(self.generateStimulus)
 
         self.params.child('Motor parameters').sigTreeStateChanged.connect(self.generateStimulus)
+        self.params.child('DAQ', 'Input', 'Channels').sigTreeStateChanged.connect(self.channelsChanged)
 
     def disconnectParameterSlots(self):
         try:
             self.params.child('Stimulus', 'Type').sigValueChanged.disconnect(self.changeStimType)
             self.params.child('Stimulus').sigTreeStateChanged.disconnect(self.generateStimulus)
+            try:
+                self.params.child('Stimulus', 'Parameters', 'Distance between').\
+                    sigValueChanged.disconnect(self.updatePhaseOffset)
+            except Exception as exc:
+                if 'has no child named' in str(exc):
+                    pass
+                else:
+                    raise
+
             self.params.child('DAQ', 'Update rate').sigValueChanged.disconnect(self.generateStimulus)
             if MOTOR_TYPE == 'velocity':
                 self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.disconnect(
@@ -188,31 +224,280 @@ class BenderWindow(QtGui.QMainWindow):
                 self.params.child('DAQ', 'Output', 'Sampling frequency').sigValueChanged.disconnect(self.generateStimulus)
 
             self.params.child('Motor parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
+            self.params.child('DAQ', 'Input', 'Channels').sigTreeStateChanged.disconnect(self.channelsChanged)
         except TypeError:
             logging.warning('Problem disconnecting parameter slots')
             pass
 
-    def changeChannelOverlay(self, index):
-        self.setupChannels()
+    def updatePhaseOffset(self):
+        try:
+            dist = self.params['Stimulus', 'Parameters', 'Distance between']
+            self.params['Stimulus', 'Parameters', 'Base phase offset'] = dist * 0.01
+        except Exception as exc:
+            if 'has no child named' in str(exc):
+                pass
+            else:
+                raise
 
-    def setupChannels(self):
+    def make_spike_plots(self, start=0):
+        assert(len(self.spikeplots) == start)
+        if self.ui.spikeTypeCombo.currentIndex() == 0 or \
+                        self.ui.spikeTypeCombo.currentIndex() == 1:
+            br = pg.mkBrush('w')
+
+            for i, (pw, pen, marker) in enumerate(zip(self.plotwidgets, cycle(self.penOrder), cycle(self.markerOrder))):
+                if i < start:
+                    continue
+                self.spikeplots.append(pw.plot(pen=None, symbolPen=pen, symbolBrush=br, symbol=marker))
+
+        elif self.ui.spikeTypeCombo.currentIndex() == 2:
+            # raster plot
+            if self.ischanneloverlay:
+                yr = np.linspace(0.9, 1, self.nchannels+1)
+                yr = yr[:-1]
+                yh = (yr[1] - yr[0])*0.9
+            else:
+                yr = 0.95*np.ones((self.nchannels,))
+                yh = 0.05
+
+            for i, (pw, yr1, pen, marker) in enumerate(zip(self.plotwidgets, yr, cycle(self.penOrder),
+                                                           cycle(self.markerOrder))):
+                if i < start:
+                    continue
+                r = RasterGroup(yrange=[yr1, yr1+yh], pen=pen)
+                pw.addItem(r)
+                self.spikeplots.append(r)
+
+    def initializeChannels(self):
+        channels = self.params.child('DAQ', 'Input', 'Channels').children()
+        nchannels = len(channels)
+        self.nchannels = nchannels
+
+        # make the plot widgets
         if self.ui.channelOverlayCombo.currentIndex() == 0:
-            for plotwidget in self.plots[1:]:
-                self.ui.plot2Layout.removeItem(plotwidget)
-
+            plotwidget = self.ui.plot2Layout.addPlot()
+            self.plotwidgets = [plotwidget] * nchannels
+            self.ischanneloverlay = True
         elif self.ui.channelOverlayCombo.currentIndex() == 1:
-            channels = self.params.child('DAQ', 'Input', 'Channels').children()
-            if len(self.plots) != len(channels):
-                for _ in range(len(self.plots), len(channels)):
+            plotwidget = self.ui.plot2Layout.addPlot()
+            self.plotwidgets = [plotwidget]
+            for _ in range(nchannels-1):
+                self.ui.plot2Layout.nextRow()
+                pw = self.ui.plot2Layout.addPlot()
+                self.plotwidgets.append(pw)
+            self.ischanneloverlay = False
+
+        # make the plots
+        assert(len(self.plots) == 0)
+        for pw, pen in zip(self.plotwidgets, cycle(self.penOrder)):
+            self.plots.append(pw.plot(pen=pen))
+
+        # make the spike plots
+        self.make_spike_plots()
+
+        # make the threshold lines
+        self.spikeThreshold = np.tile(np.array([[-0.3, 0.3]]), (nchannels, 1))
+
+        br = pg.mkBrush(pg.hsvColor(0.5, sat=0.4, alpha=0.3))
+
+        self.thresholdLines = []
+        threshline = pg.LinearRegionItem(self.spikeThreshold[0],
+                                         orientation=pg.LinearRegionItem.Horizontal,
+                                         movable=True, brush=br)
+        self.plotwidgets[0].addItem(threshline)
+        self.thresholdLines.append(threshline)
+        threshline.sigRegionChangeFinished.connect(self.thresholdChanged)
+
+        if not self.ischanneloverlay:
+            for thresh, pw in zip(self.spikeThreshold[1:], self.plotwidgets[1:]):
+                threshline = pg.LinearRegionItem(thresh,
+                                                 orientation=pg.LinearRegionItem.Horizontal,
+                                                 movable=True, brush=br)
+                pw.addItem(threshline)
+                self.thresholdLines.append(threshline)
+                threshline.sigRegionChangeFinished.connect(self.thresholdChanged)
+
+    def channelsChanged(self):
+        channels = self.params.child('DAQ', 'Input', 'Channels').children()
+        newnchannels = len(channels)
+
+        if newnchannels > self.nchannels:
+            curchannels = self.nchannels
+            addthresh = np.mean(self.spikeThreshold, axis=0)
+            addthresh = np.tile(addthresh, (newnchannels-curchannels, 1))
+
+            self.spikeThreshold = np.vstack((self.spikeThreshold, addthresh))
+
+            if self.ui.channelOverlayCombo.currentIndex() == 0:
+                self.plotwidgets = np.tile([self.plotwidgets[0]], (newnchannels,))
+            elif self.ui.channelOverlayCombo.currentIndex() == 1:
+                br = pg.mkBrush(pg.hsvColor(0.5, sat=0.4, alpha=0.3))
+
+                for thresh in self.spikeThreshold[newnchannels:]:
                     self.ui.plot2Layout.nextRow()
                     pw = self.ui.plot2Layout.addPlot()
-                    self.plots.append(pw)
+                    self.plotwidgets.append(pw)
 
-                for pw, chan in zip(self.plots, channels):
-                    pw.setLabel('left', chan.name(), units='V')
+                    threshline = pg.LinearRegionItem(thresh,
+                                                     orientation=pg.LinearRegionItem.Horizontal,
+                                                     movable=True, brush=br)
 
-                for pw in self.plots[:-1]:
-                    pw.hideAxis('bottom')
+                    pw.addItem(threshline)
+                    self.thresholdLines.append(threshline)
+                    threshline.sigRegionChangeFinished.connect(self.thresholdChanged)
+
+            # make the plots
+            br = pg.mkBrush('w')
+            for i, (pw, pen, marker) in enumerate(zip(self.plotwidgets, cycle(self.penOrder),
+                                                           cycle(self.markerOrder))):
+                if i < self.nchannels:
+                    continue
+                self.plots.append(pw.plot(pen=pen))
+
+            self.make_spike_plots(start=self.nchannels)
+            self.nchannels = newnchannels
+        elif newnchannels < self.nchannels:
+            for p, sp, ln, pw in self.plots[newnchannels:], self.spikeplots[newnchannels:], \
+                                 self.thresholdLines[newnchannels:], self.plotwidgets[newnchannels:]:
+                pw.removeItem(p)
+                pw.removeItem(sp)
+                pw.removeItem(ln)
+                if pw != self.plotwidgets[0]:
+                    self.ui.plot2Layout.removeItem(pw)
+
+            self.nchannels = newnchannels
+
+    def changeChannelOverlay(self, index):
+        if self.ui.channelOverlayCombo.currentIndex() == 0:
+            for plotwidget, p, sp in zip(self.plotwidgets[1:], self.plots[1:], self.spikeplots[1:]):
+                plotwidget.removeItem(p)
+                plotwidget.removeItem(sp)
+                self.plotwidgets[0].addItem(p)
+                self.plotwidgets[0].addItem(sp)
+                self.ui.plot2Layout.removeItem(plotwidget)
+
+            self.plotwidgets = np.tile([self.plotwidgets[0]], (self.nchannels,))
+            self.plotwidgets[0].setLabel('left', 'Voltage', units='V')
+
+            self.ischanneloverlay = True
+
+        elif self.ui.channelOverlayCombo.currentIndex() == 1:
+            self.plotwidgets = [self.plotwidgets[0]]
+            br = pg.mkBrush(pg.hsvColor(0.5, sat=0.4, alpha=0.3))
+            for thresh, p, sp in zip(self.spikeThreshold[1:], self.plots[1:], self.spikeplots[1:]):
+                self.ui.plot2Layout.nextRow()
+                pw = self.ui.plot2Layout.addPlot()
+                self.plotwidgets.append(pw)
+
+                self.plotwidgets[0].removeItem(p)
+                self.plotwidgets[0].removeItem(sp)
+
+                pw.addItem(p)
+                pw.addItem(sp)
+
+                threshline = pg.LinearRegionItem(thresh,
+                                                 orientation=pg.LinearRegionItem.Horizontal,
+                                                 movable=True, brush=br)
+
+                pw.addItem(threshline)
+                self.thresholdLines.append(threshline)
+                threshline.sigRegionChangeFinished.connect(self.thresholdChanged)
+
+            for pw, chan in zip(self.plotwidgets, self.params.child('DAQ', 'Input', 'Channels').children()):
+                pw.setLabel('left', chan.value(), units='V')
+
+            for pw in self.plotwidgets[:-1]:
+                pw.hideAxis('bottom')
+
+            self.ischanneloverlay = False
+
+    def changePlotType(self, index):
+        self.make_plot(self.bender.t, np.rollaxis(self.data, 1))
+
+    def changeSpikeType(self, index):
+        if index == 0:
+            for sp in self.spikeplots:
+                sp.setData(x=[], y=[])
+        else:
+            for pw, sp in zip(self.plotwidgets, self.spikeplots):
+                pw.removeItem(sp)
+
+            self.spikeplots = []
+            self.make_spike_plots()
+
+        if len(self.t) > 0 and len(self.data) > 0:
+            self.make_plot(self.t, np.rollaxis(self.data, 1))
+
+    def thresholdChanged(self, threshline):
+        rgn = threshline.getRegion()
+        logging.debug("threshold changed: {}".format(rgn))
+
+        if len(self.thresholdLines) > 1:
+            i = self.thresholdLines.index(threshline)
+            self.spikeThreshold[i] = rgn
+        else:
+            self.spikeThreshold[:, :] = rgn
+
+        if len(self.data) > 0:
+            self.make_plot(self.t, np.rollaxis(self.data, 1))
+
+    def find_spikes(self, x, data):
+        spikex = []
+        spikeamp = []
+        for chan, thresh in zip(data, self.spikeThreshold):
+            spikeindhi = signal.argrelmax(chan, order=2)
+            spikeindhi = spikeindhi[0]
+            ishi = chan[spikeindhi] > thresh[1]
+            spikeindhi = spikeindhi[ishi]
+
+            spikeindlo = signal.argrelmin(chan, order=2)
+            spikeindlo = spikeindlo[0]
+            islo = chan[spikeindlo] < thresh[0]
+            spikeindlo = spikeindlo[islo]
+
+            spikeind1 = np.sort(np.concatenate((spikeindhi, spikeindlo)), kind='mergesort')
+
+            spikeamp.append(chan[spikeind1])
+            spikex.append(x[spikeind1])
+
+        return spikex, spikeamp
+
+    def make_phase(self, t):
+        phase = t * self.params['Stimulus', 'Parameters', 'Frequency']
+
+        cycles = np.floor(phase)
+        phase -= cycles
+
+        return phase, cycles
+
+    def make_plot(self, t, data, append=False):
+        showraster = False
+        if self.ui.plotTypeCombo.currentIndex() == 0:
+            x = t
+        elif self.ui.plotTypeCombo.currentIndex() == 1:
+            phase, cycles = self.make_phase(t)
+            x = phase + cycles
+        elif self.ui.plotTypeCombo.currentIndex() == 2:
+            phase, cycles = self.make_phase(t)
+            x = phase + cycles
+            showraster = True
+
+        for p, pw, chan in zip(self.plots, self.plotwidgets, data):
+            if not showraster:
+                p.setData(x=x, y=chan)
+            else:
+                p.setData(x=[], y=[])
+
+        if self.ui.spikeTypeCombo.currentIndex() > 0:
+            spikex, spikeamp = self.find_spikes(x, data)
+
+            for p, pw, sx, sa in zip(self.spikeplots, self.plotwidgets, spikex, spikeamp):
+                if not showraster:
+                    p.setData(x=sx, y=sa)
+                else:
+                    cyc = np.floor(sx)
+                    ph = phase - cyc
+                    p.setData(x=ph, y=cyc)
 
     def startAcquisition(self):
         self.ui.goButton.setText('Abort')
@@ -226,27 +511,12 @@ class BenderWindow(QtGui.QMainWindow):
 
         self.encoderPlot = self.ui.plot1Widget.plot(pen='k')
 
-        self.plot2 = self.ui.plot2Widget.plot(pen='k', clear=True)
-        self.overlayPlot = self.ui.plot2Widget.plot(pen='r', clear=False)
+        self.plotwidgets[-1].setLabel('bottom', "Time", units='sec')
 
-        self.ui.plot2Widget.setLabel('left', self.ui.plotYBox.currentText(), units='unscaled')
-        self.ui.plot2Widget.setLabel('bottom', "Time", units='sec')
-
-        yname = str(self.ui.plotYBox.currentText())
-        if yname in self.plotNames:
-            self.plotYNum = self.plotNames[yname]
-        elif 'X torque' in yname:
-            self.plotYNum = self.plotNames['X torque']
-        elif 'Y force' in yname:
-            self.plotYNum = self.plotNames['Y force']
-        else:
-            self.plotYNum = 0
+        for pw in self.plotwidgets:
+            pw.setXLink(self.ui.plot1Widget)
 
         self.bender.start()
-
-        # self.ui.plot2Widget.plot(x=self.bender.t[0:len(self.bender.encoder_in_data)],
-        #                          y=self.bender.encoder_in_data, clear=True, pen='r')
-        # self.ui.plot2Widget.setXLink(self.ui.plot1Widget)
 
     def updateAcquisitionPlot(self, t, aidata, encdata):
         logging.debug('updatePlot')
@@ -255,7 +525,11 @@ class BenderWindow(QtGui.QMainWindow):
         aidata = aidata.reshape((len(t), -1))
 
         self.encoderPlot.setData(x=t, y=encdata)
-        self.plot2.setData(x=t, y=aidata[:, self.plotYNum])
+
+        self.t = t
+        self.data = aidata
+
+        self.make_plot(t, np.rollaxis(aidata, 1))
 
         logging.debug('updateAcquisitionPlot end')
 
@@ -264,10 +538,10 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.goButton.clicked.disconnect(self.bender.abort)
         self.ui.goButton.clicked.connect(self.startAcquisition)
 
-        self.data0 = self.bender.analog_in_data
-        self.data = self.filterData()
+        self.t = self.bender.t
+        self.data = self.bender.analog_in_data
 
-        self.updatePlot()
+        self.make_plot(self.bender.t, np.rollaxis(self.data, 1))
 
         filepath = str(self.ui.outputPathEdit.text())
         filename, ext = os.path.splitext(self.curFileName)
@@ -276,311 +550,6 @@ class BenderWindow(QtGui.QMainWindow):
             benderFile.saveRawData(self.bender.analog_in_data, self.bender.encoder_in_data, self.params)
 
         self.ui.nextFileNumberBox.setValue(self.ui.nextFileNumberBox.value() + 1)
-
-        self.ui.plotXBox.currentIndexChanged.connect(self.changePlotX)
-        self.ui.plotYBox.currentIndexChanged.connect(self.changePlotY)
-
-        self.ui.filterCheck.stateChanged.connect(self.filterChecked)
-        self.ui.filterCutoffBox.valueChanged.connect(self.filterCutoffChanged)
-
-        self.ui.overlayCheck.stateChanged.connect(self.overlayChecked)
-        self.ui.overlayFromBox.currentIndexChanged.connect(self.overlayFromChanged)
-        self.ui.overlayColorBox.currentIndexChanged.connect(self.overlayColorChanged)
-
-    def filterChecked(self, state):
-        self.data = self.filterData(buildfilter=True)
-        self.updatePlot()
-
-    def filterCutoffChanged(self, cutoff):
-        self.data = self.filterData(buildfilter=True)
-        self.updatePlot()
-
-    def filterData(self, buildfilter=False, data0=None):
-        if self.ui.filterCheck.isChecked():
-            if self.filter is None or buildfilter:
-                cutoff = self.ui.filterCutoffBox.value()
-                sampfreq = self.params['DAQ', 'Input', 'Sampling frequency']
-
-                b, a = signal.butter(5, cutoff / (sampfreq / 2))
-                self.filter = (b, a)
-
-            if data0 is None:
-                data0 = self.data0
-
-            data = []
-            if data0.ndim == 1:
-                data = signal.filtfilt(self.filter[0], self.filter[1], data0)
-            else:
-                for data1 in data0.T:
-                    data1 = signal.filtfilt(self.filter[0], self.filter[1], data1)
-                    data.append(data1)
-
-                data = np.array(data).T
-        else:
-            data = copy(self.data0)
-        return data
-
-    def updatePlot(self):
-        self.changePlot(xname=self.ui.plotXBox.currentText(), yname=self.ui.plotYBox.currentText(),
-                        colorbyname=self.ui.colorByBox.currentText())
-
-    def getX(self, xname):
-        if xname == 'Time (sec)':
-            x = self.bender.t
-            xunit = 'sec'
-            self.ui.plot2Widget.setXLink(self.ui.plot1Widget)
-        elif xname == 'Time (cycles)':
-            x = self.bender.tnorm
-            xunit = 'cycles'
-        elif xname == 'Phase':
-            x = np.mod(self.bender.phase, 1)
-            xunit = ''
-        elif xname == 'Angle':
-            x = self.bender.encoder_in_data
-            xunit = 'deg'
-        else:
-            assert False
-
-        return x, xunit
-
-    def getY(self, yname):
-        if yname == 'Body torque from X torque':
-            y, yunit = self.getBodyTorque('X torque')
-        elif yname == 'Body torque from Y force':
-            y, yunit = self.getBodyTorque('Y force')
-        elif str(yname) in self.plotNames:
-            y = self.data[:, self.plotNames[str(yname)]]
-            if 'force' in yname:
-                yunit = 'N'
-            elif 'torque' in yname:
-                yunit = 'N m'
-            else:
-                yunit = ''
-                logging.debug('Unrecognized y variable unit: %s', yname)
-        else:
-            assert False
-
-        return y, yunit
-
-    def changePlot(self, xname, yname, colorbyname):
-        self.ui.plot2Widget.setXLink(None)
-
-        x, xunit = self.getX(xname)
-        y, yunit = self.getY(yname)
-
-        tnorm = self.bender.tnorm
-
-        self.ui.plot2Widget.clear()
-
-        maxcyc = np.ceil(np.max(tnorm))
-        if xname != 'Time (sec)':
-            for cyc in range(-1, int(maxcyc)):
-                iscycle = np.logical_and(tnorm >= cyc, tnorm <= cyc + 1)
-                if any(iscycle):
-                    self.ui.plot2Widget.plot(pen='k', clear=False, x=x[iscycle], y=y[iscycle])
-        else:
-            self.ui.plot2Widget.plot(pen='k', clear=False, x=x, y=y)
-
-        self.ui.plot2Widget.setLabel('left', yname, units=yunit)
-        self.ui.plot2Widget.setLabel('bottom', xname, units=xunit)
-
-        if xname == 'Time (sec)':
-            Lbrush = pg.mkBrush(pg.hsvColor(0.0, sat=0.4, alpha=0.3))
-            Rbrush = pg.mkBrush(pg.hsvColor(0.5, sat=0.4, alpha=0.3))
-
-            for onoff in self.bender.Lonoff:
-                act1 = pg.LinearRegionItem(onoff, movable=False, brush=Lbrush)
-                self.ui.plot2Widget.addItem(act1)
-            for onoff in self.bender.Ronoff:
-                act1 = pg.LinearRegionItem(onoff, movable=False, brush=Rbrush)
-                self.ui.plot2Widget.addItem(act1)
-        else:
-            Lpen = pg.mkPen(color=pg.hsvColor(0.0, sat=0.4), width=4)
-            Rpen = pg.mkPen(pg.hsvColor(0.5, sat=0.4), width=4)
-
-            t = self.bender.t
-            for onoff in self.bender.Lonoff:
-                ison = np.logical_and(t >= onoff[0], t < onoff[1])
-                self.ui.plot2Widget.plot(pen=Lpen, clear=False, x=x[ison], y=y[ison])
-
-            for onoff in self.bender.Ronoff:
-                ison = np.logical_and(t >= onoff[0], t < onoff[1])
-                self.ui.plot2Widget.plot(pen=Rpen, clear=False, x=x[ison], y=y[ison])
-
-        ymed = np.nanmedian(y)
-        logging.debug('ymed={}'.format(ymed))
-
-        self.getWork(yctr=ymed)
-
-        self.ui.plot2Widget.autoRange()
-        logging.debug('changePlot end')
-
-    def changePlotX(self, xind):
-        xname = self.ui.plotXBox.itemText(xind)
-        yname = self.ui.plotYBox.currentText()
-        colorbyname = self.ui.colorByBox.currentText()
-        self.changePlot(xname, yname, colorbyname)
-
-    def changePlotY(self, yind):
-        yname = self.ui.plotYBox.itemText(yind)
-        xname = self.ui.plotXBox.currentText()
-        colorbyname = self.ui.colorByBox.currentText()
-        self.changePlot(xname, yname, colorbyname)
-
-    def overlayChecked(self, state):
-        self.updateOverlay()
-
-    def overlayFromChanged(self, fromName):
-        self.updateOverlay()
-
-    def overlayColorChanged(self, color):
-        self.overlayPlot.setPen(color)
-
-    def loadOtherData(self, otherFile):
-        try:
-            with h5py.File(otherFile, 'r') as f:
-                yname = str(self.ui.plotYOverlayBox.currentText())
-                dsetName = BenderFile.datasetNames[yname]
-
-                g = f['Calibrated']
-                y = np.array(g[dsetName])
-
-                y = self.filterData(data0=y)
-
-                if 'force' in yname:
-                    yunit = 'N'
-                elif 'torque' in yname:
-                    yunit = 'N m'
-                else:
-                    yunit = ''
-                    logging.debug('Unrecognized y variable unit: %s', yname)
-
-                xname = self.ui.plotXBox.currentText()
-
-                g = f['NominalStimulus']
-                if xname == 'Time (sec)':
-                    x = g['t']
-                    xunit = 'sec'
-                elif xname == 'Time (cycles)':
-                    x = g['tnorm']
-                    xunit = 'cycles'
-                elif xname == 'Phase':
-                    x = g['Phase']
-                    xunit = ''
-                elif xname == 'Angle':
-                    g = f['RawInput']
-                    x = g['Encoder']
-                    xunit = 'deg'
-                else:
-                    assert False
-
-                x = np.array(x)
-        except IOError:
-            x, y = None, None
-            xunit, yunit = '', ''
-
-        return x, xunit, y, yunit
-
-    def updateOverlay(self):
-        if self.ui.overlayCheck.isChecked():
-            xname = self.ui.plotXBox.currentText()
-            yname = self.ui.plotYOverlayBox.currentText()
-
-            if self.ui.overlayFromBox.currentText() == "Current file":
-                x, xunit = self.getX(xname)
-
-                if yname == self.ui.plotYBox.currentText():
-                    return
-
-                y, yunit = self.getY(yname)
-            else:
-                if self.ui.overlayFromBox.currentText() == "Other file...":
-                    otherFile = QtGui.QFileDialog.getOpenFileName(self, "Choose other data file",
-                                                                  filter="*.h5")
-                    if not otherFile:
-                        self.ui.overlayCheck.setChecked(False)
-                        return
-                else:
-                    otherFile = self.ui.overlayFromBox.currentText()
-
-                ind = self.ui.overlayFromBox.findText(otherFile)
-                if ind == -1:
-                    self.ui.overlayFromBox.addItem(otherFile)
-                else:
-                    self.ui.overlayFromBox.setCurrentIndex(ind)
-
-                x, xunit, y, yunit = self.loadOtherData(str(otherFile))
-
-            self.overlayPlot.setData(x=x, y=y)
-            if yname != self.ui.plotYBox.currentText():
-                self.ui.plot2Widget.setLabel('right', yname, units=yunit)
-            self.ui.plot2Widget.setLabel('bottom', xname, units=xunit)
-            self.ui.plot2Widget.autoRange()
-        else:
-            self.overlayPlot.setData(x=[], y=[])
-            self.ui.plot2Widget.hideAxis('right')
-            self.ui.plot2Widget.autoRange()
-
-    def getBodyTorque(self, yname):
-        y, yunit = self.getY(yname)
-        if 'Body torque' in yname:
-            return y, yunit
-        elif yname == 'X torque':
-            y = copy(y)
-            y *= -self.params['Geometry', 'din'] / self.params['Geometry','doutvert']
-            yunit = 'N m'
-
-            tnorm = self.bender.tnorm
-            y0 = np.mean(y[tnorm < 0])
-            y -= y0
-        elif yname == 'Y force':
-            y = copy(y)
-            y *= self.params['Geometry', 'din']
-            yunit = 'N m'
-
-            tnorm = self.bender.tnorm
-            y0 = np.mean(y[tnorm < 0])
-            y -= y0
-        else:
-            logging.warning("Can't calculate body torque from %s", yname)
-        return y, yunit
-
-    def getWork(self, yctr=None):
-        tnorm = self.bender.tnorm
-
-        maxcyc = np.max(tnorm)
-        if np.ceil(maxcyc) - maxcyc < 0.01:
-            maxcyc = np.ceil(maxcyc)
-        else:
-            maxcyc = np.floor(maxcyc)
-
-        angle = self.bender.encoder_in_data
-
-        yname = self.ui.plotYBox.currentText()
-        y, yunit = self.getBodyTorque(yname)
-
-        xname = self.ui.plotXBox.currentText()
-        x, xunit = self.getX(xname)
-
-        if yctr is None:
-            vr = self.ui.plot2Widget.viewRange()
-            yctr = (vr[1][1] + vr[1][0])/2
-        logging.debug('yctr = {}'.format(yctr))
-
-        work = []
-        xmean = []
-        for c in range(0, int(maxcyc) - 1):
-            iscycle = np.logical_and(tnorm >= c, tnorm <= c + 1)
-            if any(iscycle):
-                w1 = integrate.trapz(y[iscycle], x=angle[iscycle])
-                work.append(w1)
-
-                xmean1 = np.mean(x[iscycle])
-                xmean.append(xmean1)
-
-                text = pg.TextItem('{:.4f}'.format(w1), color='b')
-                self.ui.plot2Widget.addItem(text)
-                text.setPos(xmean1, yctr)
 
     def browseOutputPath(self):
         outputPath = QtGui.QFileDialog.getExistingDirectory(self, "Choose output directory")
@@ -614,20 +583,8 @@ class BenderWindow(QtGui.QMainWindow):
             return
 
         if self.bender.t is not None:
-            self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos, clear=True)
-            self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.vel, pen='r')
-            Lbrush = pg.mkBrush(pg.hsvColor(0.0, sat=0.4, alpha=0.3))
-            Rbrush = pg.mkBrush(pg.hsvColor(0.5, sat=0.4, alpha=0.3))
-            for onoff in self.bender.Lonoff:
-                self.ui.plot1Widget.addItem(pg.LinearRegionItem(onoff, movable=False, brush=Lbrush))
-
-            for onoff in self.bender.Ronoff:
-                self.ui.plot1Widget.addItem(pg.LinearRegionItem(onoff, movable=False, brush=Rbrush))
-
-            self.plots[0].plot(x=self.bender.tout, y=self.bender.motorpulses, clear=True, pen='r')
-            self.plots[0].plot(x=self.bender.tout, y=self.bender.motordirection, pen='b')
-
-            self.plots[0].setXLink(self.ui.plot1Widget)
+            self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos1, clear=True)
+            self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos2, pen='r')
 
             self.updateFileName()
 
@@ -655,15 +612,12 @@ class BenderWindow(QtGui.QMainWindow):
         if stimtype == 'Sine':
             data = SafeDict({'tp': 'sin',
                              'f': stim['Frequency'],
-                             'a': stim['Amplitude'],
-                             'ph': stim['Activation', 'Phase'],
-                             'lv': stim['Activation', 'Left voltage'],
-                             'rv': stim['Activation', 'Right voltage'],
+                             'a': stim['Caudal amplitude'],
+                             'ca': stim['Caudal amplitude'],
+                             'ra': stim['Rostral amplitude'],
+                             'phoff': stim['Additional phase offset'],
                              'num': self.ui.nextFileNumberBox.value()})
 
-            if not stim['Activation', 'On']:
-                data[' lv'] = 0
-                data['rv'] = 0
         elif stimtype == 'Frequency Sweep':
             data = SafeDict({'tp': 'freqsweep',
                              'a': stim['Amplitude'],
@@ -719,6 +673,10 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.plotSplitter.restoreState(settings.value("plotSplitter").toByteArray())
         self.ui.verticalSplitter.restoreState(settings.value("verticalSplitter").toByteArray())
 
+        v, ok = settings.value("channelOverlay").toInt()
+        if ok:
+            self.ui.channelOverlayCombo.setCurrentIndex(v)
+
         settings.endGroup()
 
         settings.beginGroup("File")
@@ -753,7 +711,9 @@ class BenderWindow(QtGui.QMainWindow):
 
         try:
             self.updateOutputFrequency()
+            self.updatePhaseOffset()
             self.generateStimulus(showwarning=False)
+            self.initializeChannels()
             self.updateFileName()
         except ValueError:
             # skip over problems with the settings
@@ -769,6 +729,7 @@ class BenderWindow(QtGui.QMainWindow):
         settings.setValue("position", self.pos())
         settings.setValue("verticalSplitter", self.ui.verticalSplitter.saveState())
         settings.setValue("plotSplitter", self.ui.plotSplitter.saveState())
+        settings.setValue("channelOverlay", self.ui.channelOverlayCombo.currentIndex())
         settings.endGroup()
 
         settings.beginGroup("File")

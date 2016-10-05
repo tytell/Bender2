@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>851</width>
+    <width>852</width>
     <height>603</height>
    </rect>
   </property>
@@ -192,25 +192,6 @@
         </item>
         <item>
          <layout class="QGridLayout" name="gridLayout_2">
-          <item row="1" column="2">
-           <widget class="QComboBox" name="yAxisCombo">
-            <item>
-             <property name="text">
-              <string>Raw data</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>Raster plot</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>Phase</string>
-             </property>
-            </item>
-           </widget>
-          </item>
           <item row="1" column="3">
            <widget class="QComboBox" name="channelOverlayCombo">
             <item>
@@ -226,20 +207,20 @@
            </widget>
           </item>
           <item row="1" column="1">
-           <widget class="QComboBox" name="xAxisCombo">
+           <widget class="QComboBox" name="plotTypeCombo">
             <item>
              <property name="text">
-              <string>Time</string>
+              <string>Raw data vs. time</string>
              </property>
             </item>
             <item>
              <property name="text">
-              <string>Phase</string>
+              <string>Raw data vs. phase</string>
              </property>
             </item>
             <item>
              <property name="text">
-              <string>Cycles</string>
+              <string>Phase raster</string>
              </property>
             </item>
            </widget>
@@ -247,14 +228,7 @@
           <item row="0" column="1">
            <widget class="QLabel" name="label_4">
             <property name="text">
-             <string>X axis</string>
-            </property>
-           </widget>
-          </item>
-          <item row="0" column="2">
-           <widget class="QLabel" name="label_5">
-            <property name="text">
-             <string>Y axis</string>
+             <string>Plot type</string>
             </property>
            </widget>
           </item>
@@ -263,6 +237,32 @@
             <property name="text">
              <string>Channels</string>
             </property>
+           </widget>
+          </item>
+          <item row="0" column="2">
+           <widget class="QLabel" name="label_7">
+            <property name="text">
+             <string>Spikes</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="2">
+           <widget class="QComboBox" name="spikeTypeCombo">
+            <item>
+             <property name="text">
+              <string>Off</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Amplitude</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Raster</string>
+             </property>
+            </item>
            </widget>
           </item>
          </layout>

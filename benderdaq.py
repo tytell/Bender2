@@ -17,6 +17,11 @@ except ImportError:
 from settings import SETTINGS_FILE, MOTOR_TYPE
 
 
+def set_bits(arr, bit, val):
+    """Set a particular bit in arr to equal val"""
+    np.bitwise_or(arr, np.left_shift(val, bit), arr)
+
+
 class BenderDAQ(QtCore.QObject):
     sigUpdate = QtCore.Signal(np.ndarray, np.ndarray, np.ndarray)  ## analog input buffer, encoder input buffer
     sigDoneAcquiring = QtCore.Signal()
@@ -59,92 +64,85 @@ class BenderDAQ(QtCore.QObject):
             self.t = None
             return
 
+        rampdur = self.params['Stimulus', 'Ramp duration']
+        before = self.params['Stimulus', 'Wait before'] + rampdur
+        after = self.params['Stimulus', 'Wait after'] + rampdur
+
         logging.debug('Stimulus.wait before = {}'.format(self.params['Stimulus', 'Wait before']))
         stim = self.params.child('Stimulus', 'Parameters')
-        dur = self.params['Stimulus', 'Wait before'] + stim['Cycles'] / stim['Frequency'] + \
-              self.params['Stimulus', 'Wait after']
+        dur = before + stim['Cycles'] / stim['Frequency'] + after
 
         self.nupdates = int(np.ceil(dur * self.params['DAQ', 'Update rate']))
         dur = float(self.nupdates) / self.params['DAQ', 'Update rate']
 
         self.duration = dur
 
-        t = np.arange(0.0, dur, 1 / self.params['DAQ', 'Input', 'Sampling frequency']) - \
-               self.params['Stimulus', 'Wait before']
+        dt = 1 / self.params['DAQ', 'Input', 'Sampling frequency']
+        t = np.arange(0.0, dur, dt) - before
 
-        pos = stim['Amplitude'] * np.sin(2 * np.pi * stim['Frequency'] * t)
-        pos[t < 0] = 0
-        pos[t > stim['Cycles'] / stim['Frequency']] = 0
+        # generate rostral stimulus
+        pos1 = stim['Rostral amplitude'] * np.sin(2 * np.pi * stim['Frequency'] * t)
+        pos1[t < 0] = 0
+        pos1[t > stim['Cycles'] / stim['Frequency']] = 0
 
-        vel = 2.0 * np.pi * stim['Frequency'] * stim['Amplitude'] * \
+        vel1 = 2.0 * np.pi * stim['Frequency'] * stim['Rostral amplitude'] * \
               np.cos(2 * np.pi * stim['Frequency'] * t)
-        vel[t < 0] = 0
-        vel[t > stim['Cycles'] / stim['Frequency']] = 0
+        vel1[t < 0] = 0
+        vel1[t > stim['Cycles'] / stim['Frequency']] = 0
+
+
+        # generate caudal stimulus
+        pos2 = stim['Caudal amplitude'] * np.sin(2 * np.pi * (stim['Frequency'] * t -
+                                                              stim['Base phase offset'] -
+                                                              stim['Additional phase offset']))
+        p2start = stim['Caudal amplitude'] * np.sin(2 * np.pi * (-stim['Base phase offset'] -
+                                                                 stim['Additional phase offset']))
+        p2end = stim['Caudal amplitude'] * np.sin(2 * np.pi * (stim['Cycles'] - stim['Base phase offset'] -
+                                                               stim['Additional phase offset']))
+
+        # since it has a phase offset, it may not start at zero. Ramp up to the starting position and down to the
+        # ending position
+        np.place(pos2, np.logical_and(t >= -rampdur, t < 0),
+                 np.linspace(0, p2start, int(round(rampdur/dt))))
+        np.place(pos2, np.logical_and(t > stim['Cycles'] / stim['Frequency'],
+                                      t <= stim['Cycles'] / stim['Frequency'] + rampdur),
+                 np.linspace(p2end, 0, int(round(rampdur/dt))))
+
+        pos2[t < -rampdur] = 0
+        pos2[t > stim['Cycles'] / stim['Frequency'] + rampdur] = 0
+
+        vel2 = 2.0 * np.pi * stim['Frequency'] * stim['Caudal amplitude'] * \
+              np.cos(2 * np.pi * (stim['Frequency'] * t -
+                                  stim['Base phase offset'] -
+                                  stim['Additional phase offset']))
+        np.place(vel2, np.logical_and(t >= -rampdur, t < 0), p2start / rampdur)
+        np.place(vel2, np.logical_and(t > stim['Cycles'] / stim['Frequency'],
+                                      t <= stim['Cycles'] / stim['Frequency'] + rampdur),
+                 -p2end / rampdur)
+
+        vel2[t < -rampdur] = 0
+        vel2[t > stim['Cycles'] / stim['Frequency'] + rampdur] = 0
 
         tnorm = t * stim['Frequency']
         tnorm[t < 0] = -1
         tnorm[t > stim['Cycles'] / stim['Frequency']] = np.ceil(np.max(tnorm))
 
-        # make activation
-        actburstdur = stim['Activation','Duty']/100.0 / stim['Frequency']
-        actburstdur = np.floor(actburstdur * stim['Activation','Pulse rate'] * 2) / (stim['Activation','Pulse rate'] * 2)
-        actburstduty = actburstdur * stim['Frequency']
-
-        actpulsephase = t[np.logical_and(t > 0, t < actburstdur)] * stim['Activation','Pulse rate']
-        burst = (np.mod(actpulsephase, 1) < 0.5).astype(np.float)
-
-        bendphase = tnorm - 0.25
-        bendphase[tnorm == -1] = -1
-
-        Lactcmd = np.zeros_like(t)
-        Ractcmd = np.zeros_like(t)
-        Lonoff = []
-        Ronoff = []
-
-        if stim['Activation', 'On']:
-            actphase = stim['Activation', 'Phase'] / 100.0
-            for c in range(int(stim['Activation', 'Start cycle']), int(stim['Cycles'])):
-                tstart = (c - 0.25 + actphase) / stim['Frequency']
-                tend = tstart + actburstdur
-
-                if stim['Activation', 'Left voltage'] != 0:
-                    Lonoff.append([tstart, tend])
-                    np.place(Lactcmd, np.logical_and(bendphase >= c + actphase,
-                                                     bendphase < c + actphase + actburstduty),
-                             burst)
-                if stim['Activation', 'Right voltage'] != 0:
-                    Ronoff.append(np.array([tstart, tend]) + 0.5/stim['Frequency'])
-
-                    np.place(Ractcmd, np.logical_and(bendphase >= c + 0.5 + actphase,
-                                                     bendphase < c + 0.5 + actphase + actburstduty),
-                             burst)
-
-            Lactcmd = Lactcmd * stim['Activation','Left voltage'] / stim['Activation','Left voltage scale']
-            Ractcmd = Ractcmd * stim['Activation','Right voltage'] / stim['Activation','Right voltage scale']
-
-        # upsample analog out
         tout = np.arange(0, dur, 1.0 / self.params['DAQ', 'Output', 'Sampling frequency']) + t[0]
 
-        Lacthi = interpolate.interp1d(t, Lactcmd, kind='linear', assume_sorted=True, bounds_error=False,
-                                      fill_value=0.0)(tout)
-        Racthi = interpolate.interp1d(t, Ractcmd, kind='linear', assume_sorted=True, bounds_error=False,
-                                      fill_value=0.0)(tout)
-
-        self.analog_out_data = np.row_stack((Lacthi, Racthi))
-        self.digital_out_data = self.make_motor_pulses(t, pos, vel, tout)
+        dig = self.make_motor_pulses(t, pos1, vel1, tout, bits=(1, 0, 2))
+        self.make_motor_pulses(t, pos2, vel2, tout, out=dig, bits=(4, 3, 5))
+        self.digital_out_data = dig
 
         self.t = t
-        self.pos = pos
-        self.vel = vel
+        self.pos1 = pos1
+        self.vel1 = vel1
+        self.pos2 = pos2
+        self.vel2 = vel2
         self.tnorm = tnorm
         self.phase = np.mod(tnorm, 1)
         self.duration = dur
 
         self.tout = tout
-        self.Lact = Lactcmd
-        self.Ract = Ractcmd
-        self.Lonoff = np.array(Lonoff)
-        self.Ronoff = np.array(Ronoff)
 
     def make_freqsweep_stimulus(self):
         try:
@@ -251,7 +249,7 @@ class BenderDAQ(QtCore.QObject):
         self.Lonoff = np.array([])
         self.Ronoff = np.array([])
 
-    def make_motor_stepper_pulses(self, t, pos, vel, tout):
+    def make_motor_stepper_pulses(self, t, pos, vel, tout, out=None, bits=(1, 0, 2)):
         poshi = interpolate.interp1d(t, pos, kind='linear', assume_sorted=True, bounds_error=False,
                                      fill_value=0.0)(tout)
         velhi = interpolate.interp1d(t, vel, kind='linear', assume_sorted=True, bounds_error=False,
@@ -279,13 +277,18 @@ class BenderDAQ(QtCore.QObject):
         self.motorpulses = motorstep
         self.motordirection = motordirection
 
-        dig = np.packbits(np.column_stack((np.zeros((len(motorstep), 5), dtype=np.uint8),
-                                           motorenable,
-                                           motorstep,
-                                           motordirection)))
-        return dig
+        if out is not None:
+            dig = out
+        else:
+            dig = np.zeros_like(motorstep, dtype=np.uint32)
+        set_bits(dig, bits[0], motorstep)
+        set_bits(dig, bits[1], motordirection)
+        set_bits(dig, bits[2], motorenable)
 
-    def make_motor_velocity_pulses(self, t, pos, vel, tout):
+        if out is None:
+            return dig
+
+    def make_motor_velocity_pulses(self, t, pos, vel, tout, out=None, bits=(1, 0, 2)):
 
         velhi = interpolate.interp1d(t, vel, kind='linear', assume_sorted=True, bounds_error=False,
                                      fill_value=0.0)(tout)
@@ -308,11 +311,16 @@ class BenderDAQ(QtCore.QObject):
         self.motorpulses = motorpulses
         self.motordirection = motordirection
 
-        dig = np.packbits(np.column_stack((np.zeros((len(motorpulses), 5), dtype=np.uint8),
-                                           motorenable,
-                                           motorpulses,
-                                           motordirection)))
-        return dig
+        if out is not None:
+            dig = out
+        else:
+            dig = np.zeros_like(motorpulses, dtype=np.uint32)
+        set_bits(dig, bits[0], motorpulses)
+        set_bits(dig, bits[1], motordirection)
+        set_bits(dig, bits[2], motorenable)
+
+        if out is None:
+            return dig
 
     def setup_channels(self):
         # analog input
@@ -323,18 +331,12 @@ class BenderDAQ(QtCore.QObject):
         inputParams = self.params.child('DAQ', 'Input')
         outputParams = self.params.child('DAQ', 'Output')
 
-        self.analog_in.CreateAIVoltageChan(inputParams['xForce'], 'Fx', daq.DAQmx_Val_Cfg_Default,
-                                           -10, 10, daq.DAQmx_Val_Volts, None)
-        self.analog_in.CreateAIVoltageChan(inputParams['yForce'], 'Fy', daq.DAQmx_Val_Cfg_Default,
-                                           -10, 10, daq.DAQmx_Val_Volts, None)
-        self.analog_in.CreateAIVoltageChan(inputParams['zForce'], 'Fz', daq.DAQmx_Val_Cfg_Default,
-                                           -10, 10, daq.DAQmx_Val_Volts, None)
-        self.analog_in.CreateAIVoltageChan(inputParams['xTorque'], 'Tx', daq.DAQmx_Val_Cfg_Default,
-                                           -10, 10, daq.DAQmx_Val_Volts, None)
-        self.analog_in.CreateAIVoltageChan(inputParams['yTorque'], 'Ty', daq.DAQmx_Val_Cfg_Default,
-                                           -10, 10, daq.DAQmx_Val_Volts, None)
-        self.analog_in.CreateAIVoltageChan(inputParams['zTorque'], 'Tz', daq.DAQmx_Val_Cfg_Default,
-                                           -10, 10, daq.DAQmx_Val_Volts, None)
+        channels = self.params.child('DAQ', 'Input', 'Channels').children()
+
+        for chan in channels:
+            logging.debug('chan.name() = {}, chan.value() = {}'.format(chan.name(), chan.value()))
+            self.analog_in.CreateAIVoltageChan(chan.name(), chan.value(), daq.DAQmx_Val_Cfg_Default,
+                                               -10, 10, daq.DAQmx_Val_Volts, None)
 
         self.ninsamps = int(1.0/self.params['DAQ', 'Update rate'] * inputParams['Sampling frequency'])
         self.inputbufferlen = 2*self.ninsamps
@@ -356,66 +358,34 @@ class BenderDAQ(QtCore.QObject):
         self.outputbufferlen = 2*self.noutsamps
 
         # split the output data into blocks of noutsamps
-        assert(self.analog_out_data.shape[1] == self.noutsamps*self.nupdates)
+        assert(self.digital_out_data.shape[0] == self.noutsamps*self.nupdates)
 
-        self.analog_out_buffers = []
         self.digital_out_buffers = []
         for i in range(self.nupdates):
-            aobuf = np.zeros((self.analog_out_data.shape[0], self.noutsamps))
-            aobuf[:, :] = self.analog_out_data[:, i*self.noutsamps + np.arange(self.noutsamps)]
-            assert(aobuf.flags.c_contiguous)
-            self.analog_out_buffers.append(aobuf)
-
             dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
             dobuf[:] = self.digital_out_data[i * self.noutsamps + np.arange(self.noutsamps)]
             assert (dobuf.flags.c_contiguous)
             self.digital_out_buffers.append(dobuf)
 
         # write two additional buffers full of zeros
-        aobuf = np.zeros((self.analog_out_data.shape[0], self.noutsamps))
-        self.analog_out_buffers.append(aobuf)
-        aobuf = np.zeros((self.analog_out_data.shape[0], self.noutsamps))
-        self.analog_out_buffers.append(aobuf)
-
         dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
         self.digital_out_buffers.append(dobuf)
         dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
         self.digital_out_buffers.append(dobuf)
-
-        # analog output (stimulus)
-        self.analog_out = daq.Task()
-        aobyteswritten = daq.int32()
-
-        self.analog_out.CreateAOVoltageChan(outputParams['Left stimulus'], 'Lstim',
-                                            -10, 10, daq.DAQmx_Val_Volts, None)
-        self.analog_out.CreateAOVoltageChan(outputParams['Right stimulus'], 'Rstim',
-                                            -10, 10, daq.DAQmx_Val_Volts, None)
-
-        # set the output sample frequency and number of samples to acquire
-        self.analog_out.CfgSampClkTiming("", outputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
-                                         daq.DAQmx_Val_ContSamps, self.outputbufferlen)
-        # make sure the output starts at the same time as the input
-        self.analog_out.CfgDigEdgeStartTrig("ai/StartTrigger", daq.DAQmx_Val_Rising)
-
-        # write the output data
-        self.analog_out.SetWriteRegenMode(daq.DAQmx_Val_DoNotAllowRegen)
-        self.analog_out.WriteAnalogF64(self.outputbufferlen, False, 10,
-                                       daq.DAQmx_Val_GroupByChannel,
-                                       np.column_stack(tuple(self.analog_out_buffers[0:2])),
-                                       daq.byref(aobyteswritten), None)
-
-        logging.debug('%d analog bytes written' % aobyteswritten.value)
 
         # digital output (motor)
         self.digital_out = daq.Task()
         dobyteswritten = daq.int32()
 
         self.digital_out.CreateDOChan(outputParams['Digital port'], '', daq.DAQmx_Val_ChanForAllLines)
-        # use the analog output clock for digital output
+        # use the built in clock for digital output
+        # TODO - figure out which clock to use here
         self.digital_out.CfgSampClkTiming("ao/SampleClock", outputParams['Sampling frequency'],
                                           daq.DAQmx_Val_Rising,
                                           daq.DAQmx_Val_ContSamps,
                                           self.outputbufferlen)
+        # make sure the output starts at the same time as the input
+        self.digital_out.CfgDigEdgeStartTrig("ai/StartTrigger", daq.DAQmx_Val_Rising)
 
         # write the digital data
         self.digital_out.SetWriteRegenMode(daq.DAQmx_Val_DoNotAllowRegen)
@@ -437,15 +407,15 @@ class BenderDAQ(QtCore.QObject):
         # allocate input buffers
         self.t_buffer = np.reshape(self.t, (self.nupdates, -1))
 
-        self.analog_in_data = np.zeros((self.nupdates, self.ninsamps, 6), dtype=np.float64)
+        ninchan = len(self.params.child('DAQ', 'Input', 'Channels').children())
+        self.analog_in_data = np.zeros((self.nupdates, self.ninsamps, ninchan), dtype=np.float64)
         self.encoder_in_data = np.zeros((self.nupdates, self.ninsamps), dtype=np.float64)
-        self.analog_in_buffer = np.zeros((6, self.ninsamps), dtype=np.float64)
+        self.analog_in_buffer = np.zeros((ninchan, self.ninsamps), dtype=np.float64)
         self.encoder_in_buffer = np.zeros((self.ninsamps,), dtype=np.float64)
 
         # start the digital and analog output tasks.  They won't
         # do anything until the analog input starts
         self.digital_out.StartTask()
-        self.analog_out.StartTask()
         self.encoder_in.StartTask()
         self.analog_in.StartTask()
 
@@ -471,11 +441,6 @@ class BenderDAQ(QtCore.QObject):
                                                self.encoder_in_buffer.size, daq.byref(encbytesread), None)
                 self.encoder_in_data[self.updateNum, :] = self.encoder_in_buffer
 
-                logging.debug('%d: max = %f' % (self.updateNum, np.max(self.analog_out_buffers[self.updateNum+2])))
-                self.analog_out.WriteAnalogF64(self.noutsamps, False, 10,
-                                               daq.DAQmx_Val_GroupByChannel,
-                                               self.analog_out_buffers[self.updateNum+2],
-                                               daq.byref(aobyteswritten), None)
                 self.digital_out.WriteDigitalU8(self.noutsamps, False, 10,
                                                 daq.DAQmx_Val_GroupByChannel,
                                                 self.digital_out_buffers[self.updateNum+2],
@@ -493,7 +458,6 @@ class BenderDAQ(QtCore.QObject):
 
             self.updateNum += 1
         else:
-            self.analog_out.StopTask()
             self.digital_out.StopTask()
             self.analog_in.StopTask()
             self.encoder_in.StopTask()
@@ -502,12 +466,12 @@ class BenderDAQ(QtCore.QObject):
             self.timer.stop()
             self.timer.timeout.disconnect(self.update)
 
-            self.analog_in_data = np.reshape(self.analog_in_data, (-1, 6))
+            ninchan = len(self.params.child('DAQ', 'Input', 'Channels').children())
+            self.analog_in_data = np.reshape(self.analog_in_data, (-1, ninchan))
             self.encoder_in_data = np.reshape(self.encoder_in_data, (-1,))
 
             del self.analog_in
             del self.encoder_in
-            del self.analog_out
             del self.digital_out
 
             self.sigDoneAcquiring.emit()
@@ -519,31 +483,26 @@ class BenderDAQ(QtCore.QObject):
 
         # try to stop each of the tasks, and ignore any DAQ errors
         try:
-            self.analog_out.StopTask()
-        except daq.DAQError as err:
-            logging.debug('Error stopping analog_out: {}'.format(err))
-
-        try:
             self.digital_out.StopTask()
         except daq.DAQError as err:
-            logging.debug('Error stopping analog_out: {}'.format(err))
+            logging.debug('Error stopping digital_out: {}'.format(err))
 
         try:
             self.analog_in.StopTask()
         except daq.DAQError as err:
-            logging.debug('Error stopping analog_out: {}'.format(err))
+            logging.debug('Error stopping analog_in: {}'.format(err))
 
         try:
             self.encoder_in.StopTask()
         except daq.DAQError as err:
-            logging.debug('Error stopping analog_out: {}'.format(err))
+            logging.debug('Error stopping encoder_in: {}'.format(err))
 
-        self.analog_in_data = np.reshape(self.analog_in_data, (6, -1))
+        ninchan = len(self.params.child('DAQ', 'Input', 'Channels').children())
+        self.analog_in_data = np.reshape(self.analog_in_data, (-1, ninchan))
         self.encoder_in_data = np.reshape(self.encoder_in_data, (-1,))
 
         del self.analog_in
         del self.encoder_in
-        del self.analog_out
         del self.digital_out
 
         self.sigDoneAcquiring.emit()
