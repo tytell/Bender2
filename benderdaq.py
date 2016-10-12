@@ -11,8 +11,10 @@ from PyQt4 import QtCore
 
 try:
     import PyDAQmx as daq
+    isfakedaq = False
 except ImportError:
     import FakeDAQ as daq
+    isfakedaq = True
 
 from settings import SETTINGS_FILE, MOTOR_TYPE
 
@@ -419,7 +421,10 @@ class BenderDAQ(QtCore.QObject):
         self.encoder_in.StartTask()
         self.analog_in.StartTask()
 
-        self.timer.start(int(1000.0 / self.params['DAQ', 'Update rate']))
+        delay = int(1000.0 / self.params['DAQ', 'Update rate'])
+        if isfakedaq:
+            delay = 1
+        self.timer.start(delay)
 
     def update(self):
         if self.updateNum < self.nupdates:
@@ -450,8 +455,8 @@ class BenderDAQ(QtCore.QObject):
                 self.abort()
                 return
 
-            self.sigUpdate.emit(self.t_buffer[0:self.updateNum+1, :], self.analog_in_data[0:self.updateNum+1, :, :],
-                                self.encoder_in_data[0:self.updateNum+1, :])
+            self.sigUpdate.emit(self.t_buffer[:self.updateNum+1, :], self.analog_in_data[:self.updateNum+1, :, :],
+                                self.encoder_in_data[:self.updateNum+1, :])
 
             logging.debug('Read %d ai, %d enc' % (aibytesread.value, encbytesread.value))
             logging.debug('Wrote %d ao, %d dig' % (aobyteswritten.value, dobyteswritten.value))

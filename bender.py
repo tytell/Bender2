@@ -11,12 +11,11 @@ import numpy as np
 from scipy import signal, integrate, interpolate
 import h5py
 from copy import copy
+import datetime
 
 import pyqtgraph.parametertree.parameterTypes as pTypes
 from pyqtgraph.parametertree import Parameter, ParameterTree, ParameterItem, registerParameterType
 import pyqtgraph as pg
-
-from detect_peaks import detect_peaks
 
 from bender_ui import Ui_BenderWindow
 
@@ -24,6 +23,8 @@ from benderdaq import BenderDAQ
 from benderfile import BenderFile
 
 from settings import SETTINGS_FILE, MOTOR_TYPE
+
+TIME_DEBUG = True
 
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
@@ -171,6 +172,9 @@ class BenderWindow(QtGui.QMainWindow):
 
         self.t = np.array([])
         self.data = np.array([])
+        self.spikeind = None
+        self.spikex = None
+        self.spikeamp = None
 
         self.readSettings()
 
@@ -317,6 +321,12 @@ class BenderWindow(QtGui.QMainWindow):
                 self.thresholdLines.append(threshline)
                 threshline.sigRegionChangeFinished.connect(self.thresholdChanged)
 
+        # make empty data arrays
+        self.t = np.array([])
+        self.data = np.zeros((0, self.nchannels))
+        self.spikeind = [[] for _ in range(self.nchannels)]
+        self.spikeamp = [np.array([]) for _ in range(self.nchannels)]
+
     def channelsChanged(self):
         channels = self.params.child('DAQ', 'Input', 'Channels').children()
         newnchannels = len(channels)
@@ -356,6 +366,7 @@ class BenderWindow(QtGui.QMainWindow):
 
             self.make_spike_plots(start=self.nchannels)
             self.nchannels = newnchannels
+
         elif newnchannels < self.nchannels:
             for p, sp, ln, pw in self.plots[newnchannels:], self.spikeplots[newnchannels:], \
                                  self.thresholdLines[newnchannels:], self.plotwidgets[newnchannels:]:
@@ -366,6 +377,12 @@ class BenderWindow(QtGui.QMainWindow):
                     self.ui.plot2Layout.removeItem(pw)
 
             self.nchannels = newnchannels
+
+        # clear the data arrays
+        self.t = np.array([])
+        self.data = np.zeros((0, self.nchannels))
+        self.spikeind = [[] for _ in range(self.nchannels)]
+        self.spikeamp = [np.array([]) for _ in range(self.nchannels)]
 
     def changeChannelOverlay(self, index):
         if self.ui.channelOverlayCombo.currentIndex() == 0:
@@ -412,7 +429,7 @@ class BenderWindow(QtGui.QMainWindow):
             self.ischanneloverlay = False
 
     def changePlotType(self, index):
-        self.make_plot(self.bender.t, np.rollaxis(self.data, 1))
+        self.make_plot(self.bender.t, self.data)
 
     def changeSpikeType(self, index):
         if index == 0:
@@ -425,8 +442,10 @@ class BenderWindow(QtGui.QMainWindow):
             self.spikeplots = []
             self.make_spike_plots()
 
+            self.find_spikes(self.data)
+
         if len(self.t) > 0 and len(self.data) > 0:
-            self.make_plot(self.t, np.rollaxis(self.data, 1))
+            self.make_plot(self.t, self.data)
 
     def thresholdChanged(self, threshline):
         rgn = threshline.getRegion()
@@ -439,12 +458,18 @@ class BenderWindow(QtGui.QMainWindow):
             self.spikeThreshold[:, :] = rgn
 
         if len(self.data) > 0:
-            self.make_plot(self.t, np.rollaxis(self.data, 1))
+            self.find_spikes(self.data)
+            self.make_plot(self.t, self.data)
 
-    def find_spikes(self, x, data):
-        spikex = []
-        spikeamp = []
-        for chan, thresh in zip(data, self.spikeThreshold):
+    def find_spikes(self, data, append=False, offset=0):
+        if append:
+            spikeind = self.spikeind
+            spikeamp = self.spikeamp
+        else:
+            spikeind = [[] for _ in range(self.nchannels)]
+            spikeamp = [np.array([]) for _ in range(self.nchannels)]
+
+        for i, (chan, thresh) in enumerate(zip(np.rollaxis(data, 1), self.spikeThreshold)):
             spikeindhi = signal.argrelmax(chan, order=2)
             spikeindhi = spikeindhi[0]
             ishi = chan[spikeindhi] > thresh[1]
@@ -457,10 +482,11 @@ class BenderWindow(QtGui.QMainWindow):
 
             spikeind1 = np.sort(np.concatenate((spikeindhi, spikeindlo)), kind='mergesort')
 
-            spikeamp.append(chan[spikeind1])
-            spikex.append(x[spikeind1])
+            spikeind[i].extend((spikeind1+offset).astype(np.int).tolist())
+            spikeamp[i] = np.append(spikeamp[i], chan[spikeind1])
 
-        return spikex, spikeamp
+        self.spikeind = spikeind
+        self.spikeamp = spikeamp
 
     def make_phase(self, t):
         phase = t * self.params['Stimulus', 'Parameters', 'Frequency']
@@ -470,10 +496,11 @@ class BenderWindow(QtGui.QMainWindow):
 
         return phase, cycles
 
-    def make_plot(self, t, data, append=False):
+    def make_plot(self, t, data):
         showraster = False
         if self.ui.plotTypeCombo.currentIndex() == 0:
             x = t
+            phase = []
         elif self.ui.plotTypeCombo.currentIndex() == 1:
             phase, cycles = self.make_phase(t)
             x = phase + cycles
@@ -482,16 +509,15 @@ class BenderWindow(QtGui.QMainWindow):
             x = phase + cycles
             showraster = True
 
-        for p, pw, chan in zip(self.plots, self.plotwidgets, data):
+        for p, pw, chan in zip(self.plots, self.plotwidgets, np.rollaxis(data, 1)):
             if not showraster:
                 p.setData(x=x, y=chan)
             else:
                 p.setData(x=[], y=[])
 
         if self.ui.spikeTypeCombo.currentIndex() > 0:
-            spikex, spikeamp = self.find_spikes(x, data)
-
-            for p, pw, sx, sa in zip(self.spikeplots, self.plotwidgets, spikex, spikeamp):
+            for p, pw, sind, sa in zip(self.spikeplots, self.plotwidgets, self.spikeind, self.spikeamp):
+                sx = x[sind]
                 if not showraster:
                     p.setData(x=sx, y=sa)
                 else:
@@ -516,20 +542,37 @@ class BenderWindow(QtGui.QMainWindow):
         for pw in self.plotwidgets:
             pw.setXLink(self.ui.plot1Widget)
 
+        # reset data
+        self.t = np.array([])
+        self.data = np.zeros((0, self.nchannels))
+        self.spikeind = [[] for _ in range(self.nchannels)]
+        self.spikeamp = [np.array([]) for _ in range(self.nchannels)]
+
+        self.start_acq_time = datetime.datetime.now()
+        self.last_acq_time = datetime.datetime.now()
+        self.n_acq = 0
+
         self.bender.start()
 
     def updateAcquisitionPlot(self, t, aidata, encdata):
-        logging.debug('updatePlot')
-        t = t.flatten()
-        encdata = encdata.flatten()
-        aidata = aidata.reshape((len(t), -1))
+        if TIME_DEBUG:
+            starttime = datetime.datetime.now()
+            self.n_acq += 1
+            avgdt = (starttime - self.start_acq_time) / self.n_acq
+            curdt = starttime - self.last_acq_time
+            logging.debug('updatePlot: avg dt={}, current dt={}'.format(avgdt.total_seconds(), curdt.total_seconds()))
+            self.last_acq_time = starttime
 
-        self.encoderPlot.setData(x=t, y=encdata)
+        self.encoderPlot.setData(x=t.reshape((-1,)), y=encdata.reshape((-1,)))
 
-        self.t = t
-        self.data = aidata
+        if self.ui.spikeTypeCombo.currentIndex() > 0:
+            self.find_spikes(aidata[-1, :, :], append=True, offset=(aidata.shape[0]-1)*aidata.shape[1])
 
-        self.make_plot(t, np.rollaxis(aidata, 1))
+        self.make_plot(t.reshape((-1,)), aidata.reshape((-1, self.nchannels)))
+
+        if TIME_DEBUG:
+            endtime = datetime.datetime.now()
+            logging.debug('updatePlot: duration={}'.format((endtime-starttime).total_seconds()))
 
         logging.debug('updateAcquisitionPlot end')
 
@@ -541,7 +584,7 @@ class BenderWindow(QtGui.QMainWindow):
         self.t = self.bender.t
         self.data = self.bender.analog_in_data
 
-        self.make_plot(self.bender.t, np.rollaxis(self.data, 1))
+        self.make_plot(self.bender.t, self.data)
 
         filepath = str(self.ui.outputPathEdit.text())
         filename, ext = os.path.splitext(self.curFileName)
