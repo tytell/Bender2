@@ -77,17 +77,18 @@ stepperParams = [
 
 parameterDefinitions = [
     {'name': 'DAQ', 'type': 'group', 'children': [
+        {'name': 'Device name', 'type': 'str', 'value': 'Dev1'},
         {'name': 'Input', 'type': 'group', 'children': [
             {'name': 'Sampling frequency', 'type': 'float', 'value': 1000.0, 'step': 500.0, 'siPrefix': True,
              'suffix': 'Hz'},
             ChannelGroup(name="Channels", children=[]),
-            {'name': 'Encoder', 'type': 'str', 'value': 'Dev1/ctr0'},
+            {'name': 'Encoder', 'type': 'str', 'value': 'ctr0'},
             {'name': 'Counts per revolution', 'type': 'int', 'value': 10000, 'limits': (1, 100000)}
         ]},
         {'name': 'Output', 'type': 'group', 'children': [
             {'name': 'Sampling frequency', 'type': 'float', 'value': 10000.0, 'step': 1000.0, 'siPrefix': True,
              'suffix': 'Hz', 'readonly': True},
-            {'name': 'Digital port', 'type': 'str', 'value': 'Dev1/port0'}
+            {'name': 'Digital port', 'type': 'str', 'value': 'port0'}
         ]},
         {'name': 'Update rate', 'type': 'float', 'value': 10.0, 'suffix': 'Hz'}
     ]},
