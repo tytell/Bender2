@@ -347,14 +347,23 @@ class BenderDAQ(QtCore.QObject):
                                         daq.DAQmx_Val_ContSamps, self.inputbufferlen)
 
         # encoder input
-        logging.debug('encoder: {}'.format(devname + '/' + inputParams['Encoder']))
-        self.encoder_in = daq.Task()
-        self.encoder_in.CreateCIAngEncoderChan(devname + '/' + inputParams['Encoder'], 'encoder',
+        logging.debug('encoder: {}'.format(devname + '/' + inputParams['Encoder 1']))
+        self.encoder1_in = daq.Task()
+        self.encoder1_in.CreateCIAngEncoderChan(devname + '/' + inputParams['Encoder 1'], 'encoder1',
                                                daq.DAQmx_Val_X4, False,
                                                0, daq.DAQmx_Val_AHighBHigh,
                                                daq.DAQmx_Val_Degrees,
                                                inputParams['Counts per revolution'], 0, None)
-        self.encoder_in.CfgSampClkTiming("ai/SampleClock", inputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
+        self.encoder1_in.CfgSampClkTiming("ai/SampleClock", inputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
+                                         daq.DAQmx_Val_ContSamps, self.inputbufferlen)
+
+        self.encoder2_in = daq.Task()
+        self.encoder2_in.CreateCIAngEncoderChan(devname + '/' + inputParams['Encoder 2'], 'encoder2',
+                                               daq.DAQmx_Val_X4, False,
+                                               0, daq.DAQmx_Val_AHighBHigh,
+                                               daq.DAQmx_Val_Degrees,
+                                               inputParams['Counts per revolution'], 0, None)
+        self.encoder2_in.CfgSampClkTiming("ai/SampleClock", inputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
                                          daq.DAQmx_Val_ContSamps, self.inputbufferlen)
 
         self.noutsamps = int(1.0/self.params['DAQ', 'Update rate'] * outputParams['Sampling frequency'])
@@ -382,7 +391,6 @@ class BenderDAQ(QtCore.QObject):
 
         self.digital_out.CreateDOChan(devname + '/' + outputParams['Digital port'], '', daq.DAQmx_Val_ChanForAllLines)
         # use the built in clock for digital output
-        # TODO - figure out which clock to use here
         self.digital_out.CfgSampClkTiming("OnboardClock", outputParams['Sampling frequency'],
                                           daq.DAQmx_Val_Rising,
                                           daq.DAQmx_Val_ContSamps,
@@ -412,14 +420,16 @@ class BenderDAQ(QtCore.QObject):
 
         ninchan = len(self.params.child('DAQ', 'Input', 'Channels').children())
         self.analog_in_data = np.zeros((self.nupdates, self.ninsamps, ninchan), dtype=np.float64)
-        self.encoder_in_data = np.zeros((self.nupdates, self.ninsamps), dtype=np.float64)
+        self.encoder_in_data = np.zeros((self.nupdates, self.ninsamps, 2), dtype=np.float64)
         self.analog_in_buffer = np.zeros((ninchan, self.ninsamps), dtype=np.float64)
-        self.encoder_in_buffer = np.zeros((self.ninsamps,), dtype=np.float64)
+        self.encoder1_in_buffer = np.zeros((self.ninsamps,), dtype=np.float64)
+        self.encoder2_in_buffer = np.zeros((self.ninsamps,), dtype=np.float64)
 
         # start the digital and analog output tasks.  They won't
         # do anything until the analog input starts
         self.digital_out.StartTask()
-        self.encoder_in.StartTask()
+        self.encoder1_in.StartTask()
+        self.encoder2_in.StartTask()
         self.analog_in.StartTask()
 
         delay = int(1000.0 / self.params['DAQ', 'Update rate'])
@@ -443,9 +453,12 @@ class BenderDAQ(QtCore.QObject):
                                              self.analog_in_buffer, self.analog_in_buffer.size,
                                              daq.byref(aibytesread), None)
                 self.analog_in_data[self.updateNum, :, :] = self.analog_in_buffer.T
-                self.encoder_in.ReadCounterF64(self.ninsamps, interval*0.1, self.encoder_in_buffer,
-                                               self.encoder_in_buffer.size, daq.byref(encbytesread), None)
-                self.encoder_in_data[self.updateNum, :] = self.encoder_in_buffer
+                self.encoder1_in.ReadCounterF64(self.ninsamps, interval*0.1, self.encoder1_in_buffer,
+                                               self.encoder1_in_buffer.size, daq.byref(encbytesread), None)
+                self.encoder_in_data[self.updateNum, :, 0] = self.encoder1_in_buffer
+                self.encoder2_in.ReadCounterF64(self.ninsamps, interval*0.1, self.encoder2_in_buffer,
+                                               self.encoder2_in_buffer.size, daq.byref(encbytesread), None)
+                self.encoder_in_data[self.updateNum, :, 1] = self.encoder2_in_buffer
 
                 self.digital_out.WriteDigitalU32(self.noutsamps, False, 10,
                                                 daq.DAQmx_Val_GroupByChannel,
@@ -457,7 +470,7 @@ class BenderDAQ(QtCore.QObject):
                 return
 
             self.sigUpdate.emit(self.t_buffer[:self.updateNum+1, :], self.analog_in_data[:self.updateNum+1, :, :],
-                                self.encoder_in_data[:self.updateNum+1, :])
+                                self.encoder_in_data[:self.updateNum+1, :, :])
 
             logging.debug('Read %d ai, %d enc' % (aibytesread.value, encbytesread.value))
             logging.debug('Wrote %d ao, %d dig' % (aobyteswritten.value, dobyteswritten.value))
@@ -466,7 +479,8 @@ class BenderDAQ(QtCore.QObject):
         else:
             self.digital_out.StopTask()
             self.analog_in.StopTask()
-            self.encoder_in.StopTask()
+            self.encoder1_in.StopTask()
+            self.encoder2_in.StopTask()
 
             logging.debug('Stopping')
             self.timer.stop()
@@ -474,10 +488,11 @@ class BenderDAQ(QtCore.QObject):
 
             ninchan = len(self.params.child('DAQ', 'Input', 'Channels').children())
             self.analog_in_data = np.reshape(self.analog_in_data, (-1, ninchan))
-            self.encoder_in_data = np.reshape(self.encoder_in_data, (-1,))
+            self.encoder_in_data = np.reshape(self.encoder_in_data, (-1, 2))
 
             del self.analog_in
-            del self.encoder_in
+            del self.encoder1_in
+            del self.encoder2_in
             del self.digital_out
 
             self.sigDoneAcquiring.emit()
@@ -499,16 +514,22 @@ class BenderDAQ(QtCore.QObject):
             logging.debug('Error stopping analog_in: {}'.format(err))
 
         try:
-            self.encoder_in.StopTask()
+            self.encoder1_in.StopTask()
         except daq.DAQError as err:
-            logging.debug('Error stopping encoder_in: {}'.format(err))
+            logging.debug('Error stopping encoder1_in: {}'.format(err))
+
+        try:
+            self.encoder2_in.StopTask()
+        except daq.DAQError as err:
+            logging.debug('Error stopping encoder2_in: {}'.format(err))
 
         ninchan = len(self.params.child('DAQ', 'Input', 'Channels').children())
         self.analog_in_data = np.reshape(self.analog_in_data, (-1, ninchan))
         self.encoder_in_data = np.reshape(self.encoder_in_data, (-1,))
 
         del self.analog_in
-        del self.encoder_in
+        del self.encoder1_in
+        del self.encoder2_in
         del self.digital_out
 
         self.sigDoneAcquiring.emit()

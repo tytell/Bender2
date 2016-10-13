@@ -83,8 +83,12 @@ class BenderFile(object):
             dset = gin.create_dataset(chan1.value(), data=aidata[:, i])
             dset.attrs['HardwareChannel'] = chan1.name()
 
-        dset = gin.create_dataset('Encoder', data=encdata)
-        dset.attrs['HardwareChannel'] = params['DAQ', 'Input', 'Encoder']
+        dset = gin.create_dataset('Encoder1', data=encdata[:, 0])
+        dset.attrs['HardwareChannel'] = params['DAQ', 'Input', 'Encoder 1']
+        dset.attrs['CountsPerRev'] = params['DAQ', 'Input', 'Counts per revolution']
+
+        dset = gin.create_dataset('Encoder2', data=encdata[:, 1])
+        dset.attrs['HardwareChannel'] = params['DAQ', 'Input', 'Encoder 2']
         dset.attrs['CountsPerRev'] = params['DAQ', 'Input', 'Counts per revolution']
 
     def close(self):
