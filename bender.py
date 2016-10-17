@@ -81,17 +81,19 @@ stepperParams = [
 
 parameterDefinitions = [
     {'name': 'DAQ', 'type': 'group', 'children': [
+        {'name': 'Device name', 'type': 'str', 'value': 'Dev1'},
         {'name': 'Input', 'type': 'group', 'children': [
             {'name': 'Sampling frequency', 'type': 'float', 'value': 1000.0, 'step': 500.0, 'siPrefix': True,
              'suffix': 'Hz'},
             ChannelGroup(name="Channels", children=[]),
-            {'name': 'Encoder', 'type': 'str', 'value': 'Dev1/ctr0'},
+            {'name': 'Encoder 1', 'type': 'str', 'value': 'ctr0'},
+            {'name': 'Encoder 2', 'type': 'str', 'value': 'ctr2'},
             {'name': 'Counts per revolution', 'type': 'int', 'value': 10000, 'limits': (1, 100000)}
         ]},
         {'name': 'Output', 'type': 'group', 'children': [
             {'name': 'Sampling frequency', 'type': 'float', 'value': 10000.0, 'step': 1000.0, 'siPrefix': True,
              'suffix': 'Hz', 'readonly': True},
-            {'name': 'Digital port', 'type': 'str', 'value': 'Dev1/port0'}
+            {'name': 'Digital port', 'type': 'str', 'value': 'port0'}
         ]},
         {'name': 'Update rate', 'type': 'float', 'value': 10.0, 'suffix': 'Hz'}
     ]},
@@ -539,7 +541,8 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.fileNameLabel.setText(filename)
         self.curFileName = filename
 
-        self.encoderPlot = self.ui.plot1Widget.plot(pen='k')
+        self.encoderPlot1 = self.ui.plot1Widget.plot(pen='k', name='Encoder 1')
+        self.encoderPlot2 = self.ui.plot1Widget.plot(pen='g', name='Encoder 2')
 
         self.plotwidgets[-1].setLabel('bottom', "Time", units='sec')
 
@@ -567,7 +570,9 @@ class BenderWindow(QtGui.QMainWindow):
             logging.debug('updatePlot: avg dt={}, current dt={}'.format(avgdt.total_seconds(), curdt.total_seconds()))
             self.last_acq_time = starttime
 
-        self.encoderPlot.setData(x=t.reshape((-1,)), y=encdata.reshape((-1,)))
+        encdata = encdata.reshape((-1, 2))
+        self.encoderPlot1.setData(x=t.reshape((-1,)), y=encdata[:, 0])
+        self.encoderPlot2.setData(x=t.reshape((-1,)), y=encdata[:, 1])
 
         if self.ui.spikeTypeCombo.currentIndex() > 0:
             self.find_spikes(aidata[-1, :, :], append=True, offset=(aidata.shape[0]-1)*aidata.shape[1])
