@@ -159,18 +159,23 @@ class BenderDAQ(QtCore.QObject):
 
         dur = stim['Duration']
 
-        totaldur = self.params['Stimulus', 'Wait before'] + stim['Duration'] + \
-                   self.params['Stimulus', 'Wait after']
+        rampdur = self.params['Stimulus', 'Ramp duration']
+        before = self.params['Stimulus', 'Wait before'] + rampdur
+        after = self.params['Stimulus', 'Wait after'] + rampdur
+
+        totaldur = before + dur + after
         self.duration = totaldur
 
-        t = np.arange(0.0, totaldur, 1 / self.params['DAQ', 'Input', 'Sampling frequency']) - \
-               self.params['Stimulus', 'Wait before']
+        dt = 1.0 / self.params['DAQ', 'Input', 'Sampling frequency']
+        t = np.arange(0.0, totaldur, dt) - before
 
         if stim['End frequency'] == stim['Start frequency']:
             # exponential sweep blows up if the frequencies are equal
             sweeptype = 'Linear'
         else:
             sweeptype = stim['Frequency change']
+
+        phoff = stim['Base phase offset'] + stim['Additional phase offset']
 
         if sweeptype == 'Exponential':
             lnk = 1/dur * (np.log(stim['End frequency']) - np.log(stim['Start frequency']))
@@ -186,10 +191,19 @@ class BenderDAQ(QtCore.QObject):
 
             logging.debug('stim children: {}'.format(stim.children()))
             a0 = stim['Start frequency'] ** stim['Frequency exponent']
-            pos = stim['Amplitude']/a0 * (np.power(f, stim['Frequency exponent'])) * np.sin(tnorm)
-            vel = stim['Amplitude']/a0 * np.exp(stim['Frequency exponent']*t*lnk) * lnk * \
+            pos1 = stim['Rostral amplitude']/a0 * (np.power(f, stim['Frequency exponent'])) * np.sin(tnorm)
+            vel1 = stim['Rostral amplitude']/a0 * np.exp(stim['Frequency exponent']*t*lnk) * lnk * \
                   (stim['Frequency exponent'] * np.sin(tnorm) +
                    2*np.pi/lnk * f * np.cos(tnorm))
+
+            pos2 = stim['Caudal amplitude'] / a0 * (np.power(f, stim['Frequency exponent'])) * np.sin(tnorm - phoff)
+            vel2 = stim['Caudal amplitude'] / a0 * np.exp(stim['Frequency exponent'] * t * lnk) * lnk * \
+                   (stim['Frequency exponent'] * np.sin(tnorm - phoff) +
+                    2 * np.pi / lnk * f * np.cos(tnorm - phoff))
+            p2start = stim['Caudal amplitude'] / a0 * (stim['Start frequency'] ** stim['Frequency exponent']) * \
+                      np.sin(-phoff)
+            p2end = stim['Caudal amplitude'] / a0 * (stim['End frequency'] ** stim['Frequency exponent']) * \
+                    np.sin(2*np.pi*stim['Start frequency'] * (np.exp(dur * lnk) - 1)/lnk - phoff)
 
         elif sweeptype == 'Linear':
             k = (stim['End frequency'] - stim['Start frequency']) / dur
@@ -202,54 +216,58 @@ class BenderDAQ(QtCore.QObject):
 
             b = stim['Frequency exponent']
             a0 = stim['Start frequency'] ** b
-            pos = stim['Amplitude']/a0 * np.power(f, b) * np.sin(tnorm)
-            vel = stim['Amplitude']/a0 * (b * k * np.power(f, b-1) * np.sin(tnorm) +
+            pos1 = stim['Rostral amplitude']/a0 * np.power(f, b) * np.sin(tnorm)
+            vel1 = stim['Rostral amplitude']/a0 * (b * k * np.power(f, b-1) * np.sin(tnorm) +
                                           2*np.pi * np.power(f, b+1) * np.cos(tnorm))
+
+
+            pos2 = stim['Caudal amplitude'] / a0 * np.power(f, b) * np.sin(tnorm - phoff)
+            vel2 = stim['Caudal amplitude'] / a0 * (b * k * np.power(f, b - 1) * np.sin(tnorm - phoff) +
+                                                     2 * np.pi * np.power(f, b + 1) * np.cos(tnorm - phoff))
         else:
             raise ValueError("Unrecognized frequency sweep type: {}".format(stim['Frequency change']))
 
-        pos[t < 0] = 0
-        pos[t > dur] = 0
+        pos1[t < 0] = 0
+        pos1[t > dur] = 0
 
-        vel[t < 0] = 0
-        vel[t > dur] = 0
+        vel1[t < 0] = 0
+        vel1[t > dur] = 0
+
+        # since it has a phase offset, it may not start at zero. Ramp up to the starting position and down to the
+        # ending position
+        np.place(pos2, np.logical_and(t >= -rampdur, t < 0),
+                 np.linspace(0, p2start, int(round(rampdur/dt))))
+        np.place(pos2, np.logical_and(t > dur, t <= dur + rampdur),
+                 np.linspace(p2end, 0, int(round(rampdur/dt))))
+
+        pos2[t < -rampdur] = 0
+        pos2[t > dur+rampdur] = 0
+
+        np.place(vel2, np.logical_and(t >= -rampdur, t < 0), p2start / rampdur)
+        np.place(vel2, np.logical_and(t > dur, t <= dur + rampdur), -p2end / rampdur)
+
+        vel2[t < -rampdur] = 0
+        vel2[t > dur+rampdur] = 0
 
         tnorm[t < 0] = -1
         tnorm[t > dur] = np.ceil(np.max(tnorm))
 
-        if self.params['Stimulus', 'Wait after'] > 0.5:
-            isramp = np.logical_and(t >= dur, t < dur+0.5)
-            k = int((self.params['Stimulus', 'Wait before'] + dur) * self.params['DAQ', 'Input', 'Sampling frequency'])
-        else:
-            isramp = t >= totaldur - 0.5
-            k = int((totaldur - 0.5) * self.params['DAQ', 'Input', 'Sampling frequency'])
+        tout = np.arange(t[0], t[-1], 1.0 / self.params['DAQ', 'Output', 'Sampling frequency']) + t[0]
 
-        pend = pos[k]
-        velend = (0 - pend) / 0.5
-
-        ramp = pend + (t[isramp] - t[k])*velend
-
-        np.place(vel, isramp, velend)
-        np.place(vel, isramp, ramp)
-
-        tout = np.arange(t[0], dur, 1.0 / self.params['DAQ', 'Output', 'Sampling frequency'])
-
-        self.digital_out_data = self.make_motor_pulses(t, vel, tout)
+        dig = self.make_motor_pulses(t, pos1, vel1, tout, bits=(1, 0, 2))
+        self.make_motor_pulses(t, pos2, vel2, tout, out=dig, bits=(4, 3, 5))
+        self.digital_out_data = dig
 
         self.t = t
-        self.pos = pos
-        self.vel = vel
+        self.pos1 = pos1
+        self.vel1 = vel1
+        self.pos2 = pos2
+        self.vel2 = vel2
         self.tnorm = tnorm
         self.phase = np.mod(tnorm, 1)
         self.duration = totaldur
 
         self.tout = tout
-        self.Lact = np.zeros_like(self.t)
-        self.Ract = np.zeros_like(self.t)
-        self.analog_out_data = np.zeros((2,len(tout)))
-
-        self.Lonoff = np.array([])
-        self.Ronoff = np.array([])
 
     def make_motor_stepper_pulses(self, t, pos, vel, tout, out=None, bits=(1, 0, 2)):
         poshi = interpolate.interp1d(t, pos, kind='linear', assume_sorted=True, bounds_error=False,

@@ -57,9 +57,13 @@ stimParameterDefs = {
         {'name': 'Start frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
         {'name': 'End frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
         {'name': 'Frequency change', 'type': 'list', 'values': ['Exponential','Linear'], 'value': 'Exponential'},
+        {'name': 'Frequency exponent', 'type': 'float', 'value': 0.0, 'limits': (-1, 0)},
         {'name': 'Duration', 'type': 'float', 'value': 300.0, 'suffix': 'sec'},
-        {'name': 'Amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'deg'},
-        {'name': 'Frequency exponent', 'type': 'float', 'value': 0.0, 'limits': (-1, 0)}
+        {'name': 'Caudal amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'deg'},
+        {'name': 'Rostral amplitude', 'type': 'float', 'value': 15.0, 'step':1.0, 'suffix': 'deg'},
+        {'name': 'Distance between', 'type': 'int', 'value': 20, 'step': 1, 'suffix': 'seg'},
+        {'name': 'Base phase offset', 'type': 'float', 'value': 0.0, 'readonly': True},
+        {'name': 'Additional phase offset', 'type': 'float', 'value': 0.0},
     ]
 }
 
