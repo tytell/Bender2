@@ -6,8 +6,9 @@ import time
 import logging
 import numpy as np
 from scipy import integrate, interpolate
+import datetime
 
-from PyQt4 import QtCore
+from PyQt4 import QtCore, QtGui
 
 try:
     import PyDAQmx as daq
@@ -16,7 +17,7 @@ except ImportError:
     import FakeDAQ as daq
     isfakedaq = True
 
-from settings import SETTINGS_FILE, MOTOR_TYPE
+from settings import SETTINGS_FILE, MOTOR_TYPE, TIME_DEBUG
 
 
 def set_bits(arr, bit, val):
@@ -336,76 +337,79 @@ class BenderDAQ(QtCore.QObject):
         channels = self.params.child('DAQ', 'Input', 'Channels').children()
         devname = self.params['DAQ', 'Device name']
 
-        for chan in channels:
-            logging.debug('chan.name() = {}, chan.value() = {}'.format(chan.name(), chan.value()))
-            self.analog_in.CreateAIVoltageChan(devname + '/' + chan.name(), chan.value(), daq.DAQmx_Val_Cfg_Default,
-                                               -10, 10, daq.DAQmx_Val_Volts, None)
+        try:
+            for chan in channels:
+                logging.debug('chan.name() = {}, chan.value() = {}'.format(chan.name(), chan.value()))
+                self.analog_in.CreateAIVoltageChan(devname + '/' + chan.name(), chan.value(), daq.DAQmx_Val_Cfg_Default,
+                                                   -10, 10, daq.DAQmx_Val_Volts, None)
 
-        self.ninsamps = int(1.0/self.params['DAQ', 'Update rate'] * inputParams['Sampling frequency'])
-        self.inputbufferlen = 2*self.ninsamps
-        self.analog_in.CfgSampClkTiming("", inputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
-                                        daq.DAQmx_Val_ContSamps, self.inputbufferlen)
+            self.ninsamps = int(1.0/self.params['DAQ', 'Update rate'] * inputParams['Sampling frequency'])
+            self.inputbufferlen = 2*self.ninsamps
+            self.analog_in.CfgSampClkTiming("", inputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
+                                            daq.DAQmx_Val_ContSamps, self.inputbufferlen)
 
-        # encoder input
-        logging.debug('encoder: {}'.format(devname + '/' + inputParams['Encoder 1']))
-        self.encoder1_in = daq.Task()
-        self.encoder1_in.CreateCIAngEncoderChan(devname + '/' + inputParams['Encoder 1'], 'encoder1',
-                                               daq.DAQmx_Val_X4, False,
-                                               0, daq.DAQmx_Val_AHighBHigh,
-                                               daq.DAQmx_Val_Degrees,
-                                               inputParams['Counts per revolution'], 0, None)
-        self.encoder1_in.CfgSampClkTiming("ai/SampleClock", inputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
-                                         daq.DAQmx_Val_ContSamps, self.inputbufferlen)
+            # encoder input
+            logging.debug('encoder: {}'.format(devname + '/' + inputParams['Encoder 1']))
+            self.encoder1_in = daq.Task()
+            self.encoder1_in.CreateCIAngEncoderChan(devname + '/' + inputParams['Encoder 1'], 'encoder1',
+                                                   daq.DAQmx_Val_X4, False,
+                                                   0, daq.DAQmx_Val_AHighBHigh,
+                                                   daq.DAQmx_Val_Degrees,
+                                                   inputParams['Counts per revolution'], 0, None)
+            self.encoder1_in.CfgSampClkTiming("ai/SampleClock", inputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
+                                             daq.DAQmx_Val_ContSamps, self.inputbufferlen)
 
-        self.encoder2_in = daq.Task()
-        self.encoder2_in.CreateCIAngEncoderChan(devname + '/' + inputParams['Encoder 2'], 'encoder2',
-                                               daq.DAQmx_Val_X4, False,
-                                               0, daq.DAQmx_Val_AHighBHigh,
-                                               daq.DAQmx_Val_Degrees,
-                                               inputParams['Counts per revolution'], 0, None)
-        self.encoder2_in.CfgSampClkTiming("ai/SampleClock", inputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
-                                         daq.DAQmx_Val_ContSamps, self.inputbufferlen)
+            self.encoder2_in = daq.Task()
+            self.encoder2_in.CreateCIAngEncoderChan(devname + '/' + inputParams['Encoder 2'], 'encoder2',
+                                                   daq.DAQmx_Val_X4, False,
+                                                   0, daq.DAQmx_Val_AHighBHigh,
+                                                   daq.DAQmx_Val_Degrees,
+                                                   inputParams['Counts per revolution'], 0, None)
+            self.encoder2_in.CfgSampClkTiming("ai/SampleClock", inputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
+                                             daq.DAQmx_Val_ContSamps, self.inputbufferlen)
 
-        self.noutsamps = int(1.0/self.params['DAQ', 'Update rate'] * outputParams['Sampling frequency'])
-        self.outputbufferlen = 2*self.noutsamps
+            self.noutsamps = int(1.0/self.params['DAQ', 'Update rate'] * outputParams['Sampling frequency'])
+            self.outputbufferlen = 2*self.noutsamps
 
-        # split the output data into blocks of noutsamps
-        assert(self.digital_out_data.shape[0] == self.noutsamps*self.nupdates)
+            # split the output data into blocks of noutsamps
+            assert(self.digital_out_data.shape[0] == self.noutsamps*self.nupdates)
 
-        self.digital_out_buffers = []
-        for i in range(self.nupdates):
+            self.digital_out_buffers = []
+            for i in range(self.nupdates):
+                dobuf = np.zeros((self.noutsamps,), dtype=np.uint32)
+                dobuf[:] = self.digital_out_data[i * self.noutsamps + np.arange(self.noutsamps)]
+                assert (dobuf.flags.c_contiguous)
+                self.digital_out_buffers.append(dobuf)
+
+            # write two additional buffers full of zeros
             dobuf = np.zeros((self.noutsamps,), dtype=np.uint32)
-            dobuf[:] = self.digital_out_data[i * self.noutsamps + np.arange(self.noutsamps)]
-            assert (dobuf.flags.c_contiguous)
+            self.digital_out_buffers.append(dobuf)
+            dobuf = np.zeros((self.noutsamps,), dtype=np.uint32)
             self.digital_out_buffers.append(dobuf)
 
-        # write two additional buffers full of zeros
-        dobuf = np.zeros((self.noutsamps,), dtype=np.uint32)
-        self.digital_out_buffers.append(dobuf)
-        dobuf = np.zeros((self.noutsamps,), dtype=np.uint32)
-        self.digital_out_buffers.append(dobuf)
+            # digital output (motor)
+            self.digital_out = daq.Task()
+            dobyteswritten = daq.int32()
 
-        # digital output (motor)
-        self.digital_out = daq.Task()
-        dobyteswritten = daq.int32()
+            self.digital_out.CreateDOChan(devname + '/' + outputParams['Digital port'], '', daq.DAQmx_Val_ChanForAllLines)
+            # use the built in clock for digital output
+            self.digital_out.CfgSampClkTiming("OnboardClock", outputParams['Sampling frequency'],
+                                              daq.DAQmx_Val_Rising,
+                                              daq.DAQmx_Val_ContSamps,
+                                              self.outputbufferlen)
+            # make sure the output starts at the same time as the input
+            self.digital_out.CfgDigEdgeStartTrig("ai/StartTrigger", daq.DAQmx_Val_Rising)
 
-        self.digital_out.CreateDOChan(devname + '/' + outputParams['Digital port'], '', daq.DAQmx_Val_ChanForAllLines)
-        # use the built in clock for digital output
-        self.digital_out.CfgSampClkTiming("OnboardClock", outputParams['Sampling frequency'],
-                                          daq.DAQmx_Val_Rising,
-                                          daq.DAQmx_Val_ContSamps,
-                                          self.outputbufferlen)
-        # make sure the output starts at the same time as the input
-        self.digital_out.CfgDigEdgeStartTrig("ai/StartTrigger", daq.DAQmx_Val_Rising)
+            # write the digital data
+            self.digital_out.SetWriteRegenMode(daq.DAQmx_Val_DoNotAllowRegen)
+            self.digital_out.WriteDigitalU32(self.outputbufferlen, False, 10,
+                                            daq.DAQmx_Val_GroupByChannel,
+                                            np.concatenate(tuple(self.digital_out_buffers[0:2])),
+                                            daq.byref(dobyteswritten), None)
 
-        # write the digital data
-        self.digital_out.SetWriteRegenMode(daq.DAQmx_Val_DoNotAllowRegen)
-        self.digital_out.WriteDigitalU32(self.outputbufferlen, False, 10,
-                                        daq.DAQmx_Val_GroupByChannel,
-                                        np.concatenate(tuple(self.digital_out_buffers[0:2])),
-                                        daq.byref(dobyteswritten), None)
-
-        logging.debug('%d digital bytes written' % dobyteswritten.value)
+            logging.debug('%d digital bytes written' % dobyteswritten.value)
+        except daq.DAQError as err:
+            QtGui.QMessageBox.warning(None, 'Warning', str(err))
 
     def start(self):
         self.setup_channels()
@@ -437,8 +441,17 @@ class BenderDAQ(QtCore.QObject):
             delay = 1
         self.timer.start(delay)
 
+        if TIME_DEBUG:
+            self.start_acq_time = datetime.datetime.now()
+            self.last_acq_time = datetime.datetime.now()
+
     def update(self):
         if self.updateNum < self.nupdates:
+            if TIME_DEBUG:
+                start = datetime.datetime.now()
+                sincelast = start - self.last_acq_time
+                self.last_acq_time = start
+
             aibytesread = daq.int32()
             encbytesread = daq.int32()
             aobyteswritten = daq.int32()
@@ -448,6 +461,11 @@ class BenderDAQ(QtCore.QObject):
 
             # read the input data
             try:
+                self.digital_out.WriteDigitalU32(self.noutsamps, False, 10,
+                                                daq.DAQmx_Val_GroupByChannel,
+                                                self.digital_out_buffers[self.updateNum+2],
+                                                daq.byref(dobyteswritten), None)
+
                 self.analog_in.ReadAnalogF64(self.ninsamps, interval*0.1,
                                              daq.DAQmx_Val_GroupByChannel,
                                              self.analog_in_buffer, self.analog_in_buffer.size,
@@ -460,10 +478,6 @@ class BenderDAQ(QtCore.QObject):
                                                self.encoder2_in_buffer.size, daq.byref(encbytesread), None)
                 self.encoder_in_data[self.updateNum, :, 1] = self.encoder2_in_buffer
 
-                self.digital_out.WriteDigitalU32(self.noutsamps, False, 10,
-                                                daq.DAQmx_Val_GroupByChannel,
-                                                self.digital_out_buffers[self.updateNum+2],
-                                                daq.byref(dobyteswritten), None)
             except daq.DAQError as err:
                 logging.debug('Error! {}'.format(err))
                 self.abort()
@@ -476,6 +490,12 @@ class BenderDAQ(QtCore.QObject):
             logging.debug('Wrote %d ao, %d dig' % (aobyteswritten.value, dobyteswritten.value))
 
             self.updateNum += 1
+
+            if TIME_DEBUG:
+                finish = datetime.datetime.now()
+                dur = finish - start
+                logging.debug('update: duration={} ({}us), sincelast={}'.format(dur.total_seconds(), dur.microseconds,
+                                                                                sincelast.total_seconds()))
         else:
             self.digital_out.StopTask()
             self.analog_in.StopTask()

@@ -22,9 +22,7 @@ from bender_ui import Ui_BenderWindow
 from benderdaq import BenderDAQ
 from benderfile import BenderFile
 
-from settings import SETTINGS_FILE, MOTOR_TYPE
-
-TIME_DEBUG = True
+from settings import SETTINGS_FILE, MOTOR_TYPE, TIME_DEBUG
 
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
