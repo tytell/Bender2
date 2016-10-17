@@ -166,6 +166,7 @@ class BenderDAQ(QtCore.QObject):
 
         totaldur = before + dur + after
         self.duration = totaldur
+        self.nupdates = int(np.ceil(totaldur * self.params['DAQ', 'Update rate']))
 
         dt = 1.0 / self.params['DAQ', 'Input', 'Sampling frequency']
         t = np.arange(0.0, totaldur, dt) - before
@@ -176,7 +177,7 @@ class BenderDAQ(QtCore.QObject):
         else:
             sweeptype = stim['Frequency change']
 
-        phoff = stim['Base phase offset'] + stim['Additional phase offset']
+        phoff = 2*np.pi * (stim['Base phase offset'] + stim['Additional phase offset'])
 
         if sweeptype == 'Exponential':
             lnk = 1/dur * (np.log(stim['End frequency']) - np.log(stim['Start frequency']))
@@ -211,7 +212,7 @@ class BenderDAQ(QtCore.QObject):
             f = stim['Start frequency'] + k * t
 
             f[t < 0] = np.nan
-            f[t > stim['Cycles'] / stim['Frequency']] = np.nan
+            f[t > dur] = np.nan
 
             tnorm = 2*np.pi*(stim['Start frequency']*t + k/2 * np.power(t, 2))
 
@@ -225,6 +226,10 @@ class BenderDAQ(QtCore.QObject):
             pos2 = stim['Caudal amplitude'] / a0 * np.power(f, b) * np.sin(tnorm - phoff)
             vel2 = stim['Caudal amplitude'] / a0 * (b * k * np.power(f, b - 1) * np.sin(tnorm - phoff) +
                                                      2 * np.pi * np.power(f, b + 1) * np.cos(tnorm - phoff))
+
+            p2start = stim['Caudal amplitude'] * np.sin(0.0 - phoff)
+            tnormend = 2*np.pi*(stim['Start frequency']*dur + k/2 * np.power(dur, 2))
+            p2end = stim['Caudal amplitude'] / a0 * stim['End frequency'] ** b * np.sin(tnormend - phoff)
         else:
             raise ValueError("Unrecognized frequency sweep type: {}".format(stim['Frequency change']))
 
@@ -390,14 +395,13 @@ class BenderDAQ(QtCore.QObject):
             self.outputbufferlen = 2*self.noutsamps
 
             # split the output data into blocks of noutsamps
+            N = self.noutsamps*self.nupdates
+            pad = N - len(self.digital_out_data)
+            self.digital_out_data = np.pad(self.digital_out_data, ((0, pad)), mode='constant')
+
             assert(self.digital_out_data.shape[0] == self.noutsamps*self.nupdates)
 
-            self.digital_out_buffers = []
-            for i in range(self.nupdates):
-                dobuf = np.zeros((self.noutsamps,), dtype=np.uint32)
-                dobuf[:] = self.digital_out_data[i * self.noutsamps + np.arange(self.noutsamps)]
-                assert (dobuf.flags.c_contiguous)
-                self.digital_out_buffers.append(dobuf)
+            self.digital_out_buffers = np.split(self.digital_out_data, self.nupdates)
 
             # write two additional buffers full of zeros
             dobuf = np.zeros((self.noutsamps,), dtype=np.uint32)

@@ -670,7 +670,9 @@ class BenderWindow(QtGui.QMainWindow):
 
         elif stimtype == 'Frequency Sweep':
             data = SafeDict({'tp': 'freqsweep',
-                             'a': stim['Amplitude'],
+                             'a': stim['Caudal amplitude'],
+                             'ca': stim['Caudal amplitude'],
+                             'ra': stim['Rostral amplitude'],
                              'f0': stim['Start frequency'],
                              'f1': stim['End frequency']})
         else:
