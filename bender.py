@@ -20,13 +20,16 @@ from bender_ui import Ui_BenderWindow
 from benderdaq import BenderDAQ
 from benderfile import BenderFile
 
-from settings import SETTINGS_FILE, MOTOR_TYPE
+from settings import SETTINGS_FILE, MOTOR_TYPE, COUNTER_TYPE
 
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 
 
 stimParameterDefs = {
+    'None': [
+        {'name': 'Duration', 'type': 'float', 'value': 5.0, 'step': 1.0, 'suffix': 'sec'}
+    ],
     'Sine': [
         {'name': 'Amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'deg'},
         {'name': 'Frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
@@ -65,6 +68,16 @@ stepperParams = [
     {'name': 'Steps per revolution', 'type': 'float', 'value': 6400}
 ]
 
+encoderParams = [
+    {'name': 'Encoder', 'type': 'str', 'value': 'Dev1/ctr0'},
+    {'name': 'Counts per revolution', 'type': 'int', 'value': 10000, 'limits': (1, 100000)}
+]
+
+pwmParams = [
+    {'name': 'Pulse width counter', 'type': 'str', 'value': 'Dev1/ctr0'},
+    {'name': 'Base frequency', 'type': 'float', 'value': 500, 'suffix': 'Hz'}
+]
+
 parameterDefinitions = [
     {'name': 'DAQ', 'type': 'group', 'children': [
         {'name': 'Input', 'type': 'group', 'children': [
@@ -77,9 +90,7 @@ parameterDefinitions = [
             {'name': 'yTorque', 'type': 'str', 'value': 'Dev1/ai4'},
             {'name': 'zTorque', 'type': 'str', 'value': 'Dev1/ai5'},
             {'name': 'Get calibration...', 'type': 'action'},
-            {'name': 'Calibration file', 'type': 'str', 'readonly': True},
-            {'name': 'Encoder', 'type': 'str', 'value': 'Dev1/ctr0'},
-            {'name': 'Counts per revolution', 'type': 'int', 'value': 10000, 'limits': (1, 100000)}
+            {'name': 'Calibration file', 'type': 'str', 'readonly': True}
         ]},
         {'name': 'Output', 'type': 'group', 'children': [
             {'name': 'Sampling frequency', 'type': 'float', 'value': 10000.0, 'step': 1000.0, 'siPrefix': True,
@@ -90,8 +101,7 @@ parameterDefinitions = [
         ]},
         {'name': 'Update rate', 'type': 'float', 'value': 10.0, 'suffix': 'Hz'}
     ]},
-    {'name': 'Motor parameters', 'type': 'group', 'children':
-        stepperParams if MOTOR_TYPE == 'stepper' else velocityDriverParams},
+    {'name': 'Motor parameters', 'type': 'group', 'children': []},
     {'name': 'Geometry', 'type': 'group', 'children': [
         {'name': 'doutvert', 'tip': 'Vertical distance from transducer to center of pressure', 'type': 'float',
          'value': 0.011, 'step': 0.001, 'siPrefix': True, 'suffix': 'm'},
@@ -107,13 +117,12 @@ parameterDefinitions = [
         ]}
     ]},
     {'name': 'Stimulus', 'type': 'group', 'children': [
-        {'name': 'Type', 'type': 'list', 'values': ['Sine', 'Frequency Sweep'], 'value': 'Sine'},
-        {'name': 'Parameters', 'type': 'group', 'children': stimParameterDefs['Sine']},
+        {'name': 'Type', 'type': 'list', 'values': ['None', 'Sine', 'Frequency Sweep'], 'value': 'None'},
+        {'name': 'Parameters', 'type': 'group', 'children': stimParameterDefs['None']},
         {'name': 'Wait before', 'type': 'float', 'value': 1.0, 'suffix': 's'},
         {'name': 'Wait after', 'type': 'float', 'value': 1.0, 'suffix': 's'},
     ]}
 ]
-
 
 class BenderWindow(QtGui.QMainWindow):
     plotNames = {'X torque': 3,
@@ -132,8 +141,24 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.parameterTreeWidget.setParameters(self.params, showTop=False)
 
         if MOTOR_TYPE == 'stepper':
+            self.params.child('Motor parameters').addChildren(stepperParams)
             self.params.child('DAQ', 'Output', 'Sampling frequency').setWritable()
             self.params['DAQ', 'Output', 'Sampling frequency'] = 100000
+        elif MOTOR_TYPE == 'velocity':
+            self.params.child('Motor parameters').addChildren(velocityDriverParams)
+        elif MOTOR_TYPE == 'none':
+            self.params.child('Motor parameters').remove()
+            self.params.child('Stimulus', 'Type').setValues(['None'])
+            self.params.child('Stimulus', 'Type').setValue('None')
+        else:
+            raise ValueError('Unknown MOTOR_TYPE {}'.format(MOTOR_TYPE))
+
+        if COUNTER_TYPE == 'encoder':
+            self.params.child('DAQ', 'Input').addChildren(encoderParams)
+        elif COUNTER_TYPE == 'pwm':
+            self.params.child('DAQ', 'Input').addChildren(pwmParams)
+        else:
+            raise ValueError('Unknown COUNTER_TYPE {}'.format(COUNTER_TYPE))
 
         stimtype = self.params.child('Stimulus', 'Type')
         self.curStimType = stimtype.value()
@@ -521,9 +546,9 @@ class BenderWindow(QtGui.QMainWindow):
         y, yunit = self.getY(yname)
         if 'Body torque' in yname:
             return y, yunit
-        elif yname == 'X torque':
+        elif yname == 'Z torque':
             y = copy(y)
-            y *= -self.params['Geometry', 'din'] / self.params['Geometry','doutvert']
+            y *= (self.params['Geometry', 'dclamp']/2 + self.params['Geometry', 'douthoriz']) / self.params['Geometry','doutvert']
             yunit = 'N m'
 
             tnorm = self.bender.tnorm
@@ -531,7 +556,7 @@ class BenderWindow(QtGui.QMainWindow):
             y -= y0
         elif yname == 'Y force':
             y = copy(y)
-            y *= self.params['Geometry', 'din']
+            y *= -(self.params['Geometry', 'dclamp']/2 + self.params['Geometry', 'douthoriz'])
             yunit = 'N m'
 
             tnorm = self.bender.tnorm

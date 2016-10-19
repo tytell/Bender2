@@ -47,6 +47,16 @@ class BenderDAQ(QtCore.QObject):
             self.make_sine_stimulus()
         elif self.params['Stimulus', 'Type'] == 'Frequency Sweep':
             self.make_freqsweep_stimulus()
+        elif self.params['Stimulus', 'Type'] == 'None':
+            self.pos = None
+            self.vel = None
+            self.duration = self.params['Stimulus', 'Parameters', 'Duration']
+            self.digital_out_data = None
+            self.tout = None
+            self.Lact = None
+            self.Ract = None
+            self.Lonoff = None
+            self.Ronoff = None
         else:
             assert False
 
@@ -366,10 +376,11 @@ class BenderDAQ(QtCore.QObject):
             assert(aobuf.flags.c_contiguous)
             self.analog_out_buffers.append(aobuf)
 
-            dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
-            dobuf[:] = self.digital_out_data[i * self.noutsamps + np.arange(self.noutsamps)]
-            assert (dobuf.flags.c_contiguous)
-            self.digital_out_buffers.append(dobuf)
+            if self.digital_out_data is not None:
+                dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
+                dobuf[:] = self.digital_out_data[i * self.noutsamps + np.arange(self.noutsamps)]
+                assert (dobuf.flags.c_contiguous)
+                self.digital_out_buffers.append(dobuf)
 
         # write two additional buffers full of zeros
         aobuf = np.zeros((self.analog_out_data.shape[0], self.noutsamps))
@@ -377,10 +388,11 @@ class BenderDAQ(QtCore.QObject):
         aobuf = np.zeros((self.analog_out_data.shape[0], self.noutsamps))
         self.analog_out_buffers.append(aobuf)
 
-        dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
-        self.digital_out_buffers.append(dobuf)
-        dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
-        self.digital_out_buffers.append(dobuf)
+        if self.digital_out_data is not None:
+            dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
+            self.digital_out_buffers.append(dobuf)
+            dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
+            self.digital_out_buffers.append(dobuf)
 
         # analog output (stimulus)
         self.analog_out = daq.Task()
