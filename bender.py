@@ -373,8 +373,8 @@ class BenderWindow(QtGui.QMainWindow):
             self.nchannels = newnchannels
 
         elif newnchannels < self.nchannels:
-            for p, sp, ln, pw in self.plots[newnchannels:], self.spikeplots[newnchannels:], \
-                                 self.thresholdLines[newnchannels:], self.plotwidgets[newnchannels:]:
+            for p, sp, ln, pw in zip(self.plots[newnchannels:], self.spikeplots[newnchannels:], \
+                                     self.thresholdLines[newnchannels:], self.plotwidgets[newnchannels:]):
                 pw.removeItem(p)
                 pw.removeItem(sp)
                 pw.removeItem(ln)
@@ -470,6 +470,9 @@ class BenderWindow(QtGui.QMainWindow):
             self.make_plot(self.t, self.tnorm, self.freq, self.data, self.encdata)
 
     def find_spikes(self, data, append=False, offset=0):
+        if data is None or data.size == 0:
+            return
+
         if append:
             spikeind = self.spikeind
             spikeamp = self.spikeamp
@@ -546,11 +549,10 @@ class BenderWindow(QtGui.QMainWindow):
                     self.ui.plotTypeCombo.currentText() == 'Raw data vs. phase':
                     p.setData(x=sx, y=sa)
                 elif self.ui.plotTypeCombo.currentText() == 'Phase raster':
-                    cyc = np.floor(sx)
-                    ph = sx - cyc
-                    p.setData(x=cyc, y=ph)
+                    ph = np.mod(sx, 1)
+                    p.setData(x=sx, y=ph)
                 elif self.ui.plotTypeCombo.currentText() == 'Phase vs. frequency':
-                    ph = tnorm[sind] / (2*np.pi)
+                    ph = tnorm[sind]
                     ph = np.mod(ph, 1)
                     p.setData(x=sx, y=ph)
 
