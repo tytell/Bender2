@@ -560,14 +560,6 @@ class BenderWindow(QtGui.QMainWindow):
         self.bender.start()
 
     def updateAcquisitionPlot(self, t, aidata, encdata):
-        if TIME_DEBUG:
-            starttime = datetime.datetime.now()
-            self.n_acq += 1
-            avgdt = (starttime - self.start_acq_time) / self.n_acq
-            curdt = starttime - self.last_acq_time
-            logging.debug('updatePlot: avg dt={}, current dt={}'.format(avgdt.total_seconds(), curdt.total_seconds()))
-            self.last_acq_time = starttime
-
         encdata = encdata.reshape((-1, 2))
         self.encoderPlot1.setData(x=t.reshape((-1,)), y=encdata[:, 0])
         self.encoderPlot2.setData(x=t.reshape((-1,)), y=encdata[:, 1])
@@ -576,10 +568,6 @@ class BenderWindow(QtGui.QMainWindow):
             self.find_spikes(aidata[-1, :, :], append=True, offset=(aidata.shape[0]-1)*aidata.shape[1])
 
         self.make_plot(t.reshape((-1,)), aidata.reshape((-1, self.nchannels)))
-
-        if TIME_DEBUG:
-            endtime = datetime.datetime.now()
-            logging.debug('updatePlot: duration={}'.format((endtime-starttime).total_seconds()))
 
         logging.debug('updateAcquisitionPlot end')
 

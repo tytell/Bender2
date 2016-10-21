@@ -190,6 +190,7 @@ class BenderDAQ(QtCore.QObject):
 
             tnorm[t < 0] = -1
             tnorm[t > dur] = np.ceil(np.max(tnorm))
+            tnormend = 2*np.pi*stim['Start frequency'] * (np.exp(dur * lnk) - 1)/lnk
 
             logging.debug('stim children: {}'.format(stim.children()))
             a0 = stim['Start frequency'] ** stim['Frequency exponent']
@@ -197,6 +198,8 @@ class BenderDAQ(QtCore.QObject):
             vel1 = stim['Rostral amplitude']/a0 * np.exp(stim['Frequency exponent']*t*lnk) * lnk * \
                   (stim['Frequency exponent'] * np.sin(tnorm) +
                    2*np.pi/lnk * f * np.cos(tnorm))
+            p1end = stim['Rostral amplitude']/a0 * (stim['End frequency'] ** stim['Frequency exponent']) * \
+                    np.sin(tnormend)
 
             pos2 = stim['Caudal amplitude'] / a0 * (np.power(f, stim['Frequency exponent'])) * np.sin(tnorm - phoff)
             vel2 = stim['Caudal amplitude'] / a0 * np.exp(stim['Frequency exponent'] * t * lnk) * lnk * \
@@ -205,7 +208,7 @@ class BenderDAQ(QtCore.QObject):
             p2start = stim['Caudal amplitude'] / a0 * (stim['Start frequency'] ** stim['Frequency exponent']) * \
                       np.sin(-phoff)
             p2end = stim['Caudal amplitude'] / a0 * (stim['End frequency'] ** stim['Frequency exponent']) * \
-                    np.sin(2*np.pi*stim['Start frequency'] * (np.exp(dur * lnk) - 1)/lnk - phoff)
+                    np.sin(tnormend - phoff)
 
         elif sweeptype == 'Linear':
             k = (stim['End frequency'] - stim['Start frequency']) / dur
@@ -215,20 +218,20 @@ class BenderDAQ(QtCore.QObject):
             f[t > dur] = np.nan
 
             tnorm = 2*np.pi*(stim['Start frequency']*t + k/2 * np.power(t, 2))
+            tnormend = 2*np.pi*(stim['Start frequency']*dur + k/2 * np.power(dur, 2))
 
             b = stim['Frequency exponent']
             a0 = stim['Start frequency'] ** b
             pos1 = stim['Rostral amplitude']/a0 * np.power(f, b) * np.sin(tnorm)
             vel1 = stim['Rostral amplitude']/a0 * (b * k * np.power(f, b-1) * np.sin(tnorm) +
                                           2*np.pi * np.power(f, b+1) * np.cos(tnorm))
-
+            p1end = stim['Caudal amplitude'] / a0 * stim['End frequency'] ** b * np.sin(tnormend)
 
             pos2 = stim['Caudal amplitude'] / a0 * np.power(f, b) * np.sin(tnorm - phoff)
             vel2 = stim['Caudal amplitude'] / a0 * (b * k * np.power(f, b - 1) * np.sin(tnorm - phoff) +
                                                      2 * np.pi * np.power(f, b + 1) * np.cos(tnorm - phoff))
 
             p2start = stim['Caudal amplitude'] * np.sin(0.0 - phoff)
-            tnormend = 2*np.pi*(stim['Start frequency']*dur + k/2 * np.power(dur, 2))
             p2end = stim['Caudal amplitude'] / a0 * stim['End frequency'] ** b * np.sin(tnormend - phoff)
         else:
             raise ValueError("Unrecognized frequency sweep type: {}".format(stim['Frequency change']))
@@ -238,6 +241,11 @@ class BenderDAQ(QtCore.QObject):
 
         vel1[t < 0] = 0
         vel1[t > dur] = 0
+
+        # duration may not be an integer number of cycles, so pos1 may end at not zero
+        np.place(pos1, np.logical_and(t > dur, t <= dur + rampdur),
+                 np.linspace(p1end, 0, int(round(rampdur/dt))))
+        np.place(vel1, np.logical_and(t > dur, t <= dur + rampdur), -p1end / rampdur)
 
         # since it has a phase offset, it may not start at zero. Ramp up to the starting position and down to the
         # ending position
@@ -258,7 +266,7 @@ class BenderDAQ(QtCore.QObject):
         tnorm[t < 0] = -1
         tnorm[t > dur] = np.ceil(np.max(tnorm))
 
-        tout = np.arange(t[0], t[-1], 1.0 / self.params['DAQ', 'Output', 'Sampling frequency']) + t[0]
+        tout = np.arange(0, totaldur, 1.0 / self.params['DAQ', 'Output', 'Sampling frequency']) + t[0]
 
         dig = self.make_motor_pulses(t, pos1, vel1, tout, bits=(1, 0, 2))
         self.make_motor_pulses(t, pos2, vel2, tout, out=dig, bits=(4, 3, 5))
@@ -403,7 +411,7 @@ class BenderDAQ(QtCore.QObject):
 
             self.digital_out_buffers = np.split(self.digital_out_data, self.nupdates)
 
-            # write two additional buffers full of zeros
+            # add two additional buffers full of zeros
             dobuf = np.zeros((self.noutsamps,), dtype=np.uint32)
             self.digital_out_buffers.append(dobuf)
             dobuf = np.zeros((self.noutsamps,), dtype=np.uint32)
@@ -437,6 +445,7 @@ class BenderDAQ(QtCore.QObject):
         self.setup_channels()
 
         self.timer = QtCore.QTimer()
+        # self.timer.setTimerType()
         self.timer.timeout.connect(self.update)
 
         self.updateNum = 0
@@ -466,12 +475,15 @@ class BenderDAQ(QtCore.QObject):
         if TIME_DEBUG:
             self.start_acq_time = datetime.datetime.now()
             self.last_acq_time = datetime.datetime.now()
+            self.nominal_delay = datetime.timedelta(milliseconds=delay)
 
     def update(self):
         if self.updateNum < self.nupdates:
             if TIME_DEBUG:
                 start = datetime.datetime.now()
                 sincelast = start - self.last_acq_time
+                logging.debug("delay = {}s, error = {}us".format(sincelast.total_seconds(),
+                                                                 (sincelast-self.nominal_delay).microseconds))
                 self.last_acq_time = start
 
             aibytesread = daq.int32()
@@ -507,9 +519,6 @@ class BenderDAQ(QtCore.QObject):
 
             self.sigUpdate.emit(self.t_buffer[:self.updateNum+1, :], self.analog_in_data[:self.updateNum+1, :, :],
                                 self.encoder_in_data[:self.updateNum+1, :, :])
-
-            logging.debug('Read %d ai, %d enc' % (aibytesread.value, encbytesread.value))
-            logging.debug('Wrote %d ao, %d dig' % (aobyteswritten.value, dobyteswritten.value))
 
             self.updateNum += 1
 
