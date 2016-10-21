@@ -130,6 +130,7 @@ class Ui_BenderWindow(object):
         self.plotTypeCombo.addItem(_fromUtf8(""))
         self.plotTypeCombo.addItem(_fromUtf8(""))
         self.plotTypeCombo.addItem(_fromUtf8(""))
+        self.plotTypeCombo.addItem(_fromUtf8(""))
         self.gridLayout_2.addWidget(self.plotTypeCombo, 1, 1, 1, 1)
         self.label_4 = QtGui.QLabel(self.layoutWidget)
         self.label_4.setObjectName(_fromUtf8("label_4"))
@@ -176,6 +177,7 @@ class Ui_BenderWindow(object):
         self.plotTypeCombo.setItemText(0, _translate("BenderWindow", "Raw data vs. time", None))
         self.plotTypeCombo.setItemText(1, _translate("BenderWindow", "Raw data vs. phase", None))
         self.plotTypeCombo.setItemText(2, _translate("BenderWindow", "Phase raster", None))
+        self.plotTypeCombo.setItemText(3, _translate("BenderWindow", "Phase vs. frequency", None))
         self.label_4.setText(_translate("BenderWindow", "Plot type", None))
         self.label_6.setText(_translate("BenderWindow", "Channels", None))
         self.label_7.setText(_translate("BenderWindow", "Spikes", None))
@@ -185,13 +187,3 @@ class Ui_BenderWindow(object):
 
 from pyqtgraph import GraphicsLayoutWidget, PlotWidget
 from pyqtgraph.parametertree import ParameterTree
-
-if __name__ == "__main__":
-    import sys
-    app = QtGui.QApplication(sys.argv)
-    BenderWindow = QtGui.QMainWindow()
-    ui = Ui_BenderWindow()
-    ui.setupUi(BenderWindow)
-    BenderWindow.show()
-    sys.exit(app.exec_())
-

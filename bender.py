@@ -27,6 +27,7 @@ from settings import SETTINGS_FILE, MOTOR_TYPE, TIME_DEBUG
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 
+# python C:\Anaconda2\Lib\site-packages\PyQt4\uic\pyuic.py bender.ui -o bender_ui.py
 
 class ChannelGroup(pTypes.GroupParameter):
     def __init__(self, **opts):
@@ -433,7 +434,10 @@ class BenderWindow(QtGui.QMainWindow):
             self.ischanneloverlay = False
 
     def changePlotType(self, index):
-        self.make_plot(self.bender.t, self.data)
+        if index == 2 or index == 3:
+            self.ui.spikeTypeCombo.setCurrentIndex(1)
+
+        self.make_plot(self.t, self.tnorm, self.freq, self.data, self.encdata)
 
     def changeSpikeType(self, index):
         if index == 0:
@@ -449,7 +453,7 @@ class BenderWindow(QtGui.QMainWindow):
             self.find_spikes(self.data)
 
         if len(self.t) > 0 and len(self.data) > 0:
-            self.make_plot(self.t, self.data)
+            self.make_plot(self.t, self.tnorm, self.freq, self.data, self.encdata)
 
     def thresholdChanged(self, threshline):
         rgn = threshline.getRegion()
@@ -463,7 +467,7 @@ class BenderWindow(QtGui.QMainWindow):
 
         if len(self.data) > 0:
             self.find_spikes(self.data)
-            self.make_plot(self.t, self.data)
+            self.make_plot(self.t, self.tnorm, self.freq, self.data, self.encdata)
 
     def find_spikes(self, data, append=False, offset=0):
         if append:
@@ -500,21 +504,37 @@ class BenderWindow(QtGui.QMainWindow):
 
         return phase, cycles
 
-    def make_plot(self, t, data):
-        showraster = False
-        if self.ui.plotTypeCombo.currentIndex() == 0:
+    def make_plot(self, t, tnorm, freq, aidata, encdata):
+        if self.ui.plotTypeCombo.currentText() == 'Raw data vs. time':
             x = t
+            xs = self.bender.t
             phase = []
-        elif self.ui.plotTypeCombo.currentIndex() == 1:
-            phase, cycles = self.make_phase(t)
-            x = phase + cycles
-        elif self.ui.plotTypeCombo.currentIndex() == 2:
-            phase, cycles = self.make_phase(t)
-            x = phase + cycles
-            showraster = True
+            showraw = True
+        elif self.ui.plotTypeCombo.currentText() == 'Raw data vs. phase':
+            x = tnorm
+            xs = self.bender.tnorm
+            showraw = True
+        elif self.ui.plotTypeCombo.currentText() == 'Phase raster':
+            x = tnorm
+            xs = self.bender.tnorm
+            showraw = False
+        elif self.ui.plotTypeCombo.currentText() == 'Phase vs. frequency':
+            if freq is None:
+                self.ui.plotTypeCombo.setCurrentIndex(0)
+                return
+            else:
+                x = freq
+                xs = self.bender.f
+                showraw = False
 
-        for p, pw, chan in zip(self.plots, self.plotwidgets, np.rollaxis(data, 1)):
-            if not showraster:
+        self.stim_plot[0].setData(x=xs, y=self.bender.pos1)
+        self.stim_plot[1].setData(x=xs, y=self.bender.pos2)
+
+        self.encoderPlot1.setData(x=x, y=encdata[:, 0])
+        self.encoderPlot2.setData(x=x, y=encdata[:, 1])
+
+        for p, pw, chan in zip(self.plots, self.plotwidgets, np.rollaxis(aidata, 1)):
+            if showraw:
                 p.setData(x=x, y=chan)
             else:
                 p.setData(x=[], y=[])
@@ -522,12 +542,17 @@ class BenderWindow(QtGui.QMainWindow):
         if self.ui.spikeTypeCombo.currentIndex() > 0:
             for p, pw, sind, sa in zip(self.spikeplots, self.plotwidgets, self.spikeind, self.spikeamp):
                 sx = x[sind]
-                if not showraster:
+                if self.ui.plotTypeCombo.currentText() == 'Raw data vs. time' or \
+                    self.ui.plotTypeCombo.currentText() == 'Raw data vs. phase':
                     p.setData(x=sx, y=sa)
-                else:
+                elif self.ui.plotTypeCombo.currentText() == 'Phase raster':
                     cyc = np.floor(sx)
-                    ph = phase - cyc
-                    p.setData(x=ph, y=cyc)
+                    ph = sx - cyc
+                    p.setData(x=cyc, y=ph)
+                elif self.ui.plotTypeCombo.currentText() == 'Phase vs. frequency':
+                    ph = tnorm[sind] / (2*np.pi)
+                    ph = np.mod(ph, 1)
+                    p.setData(x=sx, y=ph)
 
     def startAcquisition(self):
         self.ui.goButton.setText('Abort')
@@ -549,6 +574,7 @@ class BenderWindow(QtGui.QMainWindow):
 
         # reset data
         self.t = np.array([])
+        self.tnorm = np.array([])
         self.data = np.zeros((0, self.nchannels))
         self.spikeind = [[] for _ in range(self.nchannels)]
         self.spikeamp = [np.array([]) for _ in range(self.nchannels)]
@@ -559,15 +585,30 @@ class BenderWindow(QtGui.QMainWindow):
 
         self.bender.start()
 
-    def updateAcquisitionPlot(self, t, aidata, encdata):
-        encdata = encdata.reshape((-1, 2))
-        self.encoderPlot1.setData(x=t.reshape((-1,)), y=encdata[:, 0])
-        self.encoderPlot2.setData(x=t.reshape((-1,)), y=encdata[:, 1])
-
+    def updateAcquisitionPlot(self, aidata, encdata):
         if self.ui.spikeTypeCombo.currentIndex() > 0:
             self.find_spikes(aidata[-1, :, :], append=True, offset=(aidata.shape[0]-1)*aidata.shape[1])
 
-        self.make_plot(t.reshape((-1,)), aidata.reshape((-1, self.nchannels)))
+        aidata = aidata.reshape((-1, self.nchannels))
+        encdata = encdata.reshape((-1, 2))
+
+        t = self.bender.t[:aidata.shape[0]]
+        tnorm = self.bender.tnorm[:aidata.shape[0]]
+        try:
+            freq = self.bender.f[:aidata.shape[0]]
+        except Exception:
+            freq = None
+
+        self.encoderPlot1.setData(x=t.reshape((-1,)), y=encdata[:, 0])
+        self.encoderPlot2.setData(x=t.reshape((-1,)), y=encdata[:, 1])
+
+        self.t = t
+        self.tnorm = tnorm
+        self.freq = freq
+        self.data = aidata
+        self.encdata = encdata
+
+        self.make_plot(t, tnorm, freq, aidata, encdata)
 
         logging.debug('updateAcquisitionPlot end')
 
@@ -577,9 +618,15 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.goButton.clicked.connect(self.startAcquisition)
 
         self.t = self.bender.t
+        self.tnorm = self.bender.tnorm
+        try:
+            self.freq = self.bender.f
+        except Exception:
+            self.freq = None
         self.data = self.bender.analog_in_data
+        self.encdata = self.bender.encoder_in_data
 
-        self.make_plot(self.bender.t, self.data)
+        self.make_plot(self.bender.t, self.tnorm, self.freq, self.data, self.encdata)
 
         filepath = str(self.ui.outputPathEdit.text())
         filename, ext = os.path.splitext(self.curFileName)
@@ -608,6 +655,7 @@ class BenderWindow(QtGui.QMainWindow):
         finally:
             self.connectParameterSlots()
         self.curStimType = value
+        self.updatePhaseOffset()
         self.generateStimulus()
 
     def generateStimulus(self, showwarning=True):
@@ -621,8 +669,13 @@ class BenderWindow(QtGui.QMainWindow):
             return
 
         if self.bender.t is not None:
-            self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos1, clear=True)
-            self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos2, pen='r')
+            self.stim_plot = [self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos1, clear=True),
+                self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos2, pen='r')]
+            self.t = self.bender.t
+            self.tnorm = self.bender.tnorm
+            self.freq = None
+            self.data = np.array([])
+            self.encdata = np.array([])
 
             self.updateFileName()
 
@@ -662,7 +715,8 @@ class BenderWindow(QtGui.QMainWindow):
                              'ca': stim['Caudal amplitude'],
                              'ra': stim['Rostral amplitude'],
                              'f0': stim['Start frequency'],
-                             'f1': stim['End frequency']})
+                             'f1': stim['End frequency'],
+                             'phoff': stim['Additional phase offset']})
         else:
             assert False
 
