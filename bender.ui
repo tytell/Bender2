@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>739</width>
+    <width>767</width>
     <height>694</height>
    </rect>
   </property>
@@ -228,6 +228,16 @@
              <item>
               <property name="text">
                <string>Z torque</string>
+              </property>
+             </item>
+             <item>
+              <property name="text">
+               <string>Channel 4</string>
+              </property>
+             </item>
+             <item>
+              <property name="text">
+               <string>Channel 5</string>
               </property>
              </item>
             </widget>

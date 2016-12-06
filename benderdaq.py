@@ -114,16 +114,20 @@ class BenderDAQ(QtCore.QObject):
         if stim['Activation', 'On']:
             actphase = stim['Activation', 'Phase'] / 100.0
             for c in range(int(stim['Activation', 'Start cycle']), int(stim['Cycles'])):
-                tstart = (c - 0.25 + actphase) / stim['Frequency']
+                k = np.argmax(bendphase >= c + actphase)
+                tstart = t[k]
+                # tstart = (c - 0.25 + actphase) / stim['Frequency']
                 tend = tstart + actburstdur
 
                 if stim['Activation', 'Left voltage'] != 0:
-                    Lonoff.append([tstart, tend])
+                    if any(bendphase >= c + actphase):
+                        Lonoff.append([tstart, tend])
                     np.place(Lactcmd, np.logical_and(bendphase >= c + actphase,
                                                      bendphase < c + actphase + actburstduty),
                              burst)
                 if stim['Activation', 'Right voltage'] != 0:
-                    Ronoff.append(np.array([tstart, tend]) + 0.5/stim['Frequency'])
+                    if any(bendphase >= c + actphase + 0.5):
+                        Ronoff.append(np.array([tstart, tend]) + 0.5/stim['Frequency'])
 
                     np.place(Ractcmd, np.logical_and(bendphase >= c + 0.5 + actphase,
                                                      bendphase < c + 0.5 + actphase + actburstduty),

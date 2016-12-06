@@ -117,12 +117,16 @@ parameterDefinitions = [
         ]}
     ]},
     {'name': 'Stimulus', 'type': 'group', 'children': [
-        {'name': 'Type', 'type': 'list', 'values': ['None', 'Sine', 'Frequency Sweep'], 'value': 'None'},
-        {'name': 'Parameters', 'type': 'group', 'children': stimParameterDefs['None']},
+        {'name': 'Type', 'type': 'list', 'values': ['None', 'Sine', 'Frequency Sweep'], 'value': 'Sine'},
+        {'name': 'Parameters', 'type': 'group', 'children': stimParameterDefs['Sine']},
         {'name': 'Wait before', 'type': 'float', 'value': 1.0, 'suffix': 's'},
         {'name': 'Wait after', 'type': 'float', 'value': 1.0, 'suffix': 's'},
     ]}
 ]
+
+# to update the UI -
+# run Designer.exe to modify,
+# then python C:\Anaconda2\Lib\site-packages\PyQt4\uic\pyuic.py bender.ui -o bender_ui.py
 
 class BenderWindow(QtGui.QMainWindow):
     plotNames = {'X torque': 3,
@@ -369,6 +373,12 @@ class BenderWindow(QtGui.QMainWindow):
             y, yunit = self.getBodyTorque('X torque')
         elif yname == 'Body torque from Y force':
             y, yunit = self.getBodyTorque('Y force')
+        elif yname == 'Channel 4':
+            y = self.bender.analog_in_data[:, 4]
+            yunit = 'V'
+        elif yname == 'Channel 5':
+            y = self.bender.analog_in_data[:, 5]
+            yunit = 'V'
         elif str(yname) in self.plotNames:
             y = self.data[:, self.plotNames[str(yname)]]
             if 'force' in yname:
@@ -410,11 +420,11 @@ class BenderWindow(QtGui.QMainWindow):
             Rbrush = pg.mkBrush(pg.hsvColor(0.5, sat=0.4, alpha=0.3))
 
             for onoff in self.bender.Lonoff:
-                act1 = pg.LinearRegionItem(onoff, movable=False, brush=Lbrush)
-                self.ui.plot2Widget.addItem(act1)
+                leftplot = pg.LinearRegionItem(onoff, movable=False, brush=Lbrush)
+                self.ui.plot2Widget.addItem(leftplot)
             for onoff in self.bender.Ronoff:
-                act1 = pg.LinearRegionItem(onoff, movable=False, brush=Rbrush)
-                self.ui.plot2Widget.addItem(act1)
+                rightplot = pg.LinearRegionItem(onoff, movable=False, brush=Rbrush)
+                self.ui.plot2Widget.addItem(rightplot)
         else:
             Lpen = pg.mkPen(color=pg.hsvColor(0.0, sat=0.4), width=4)
             Rpen = pg.mkPen(pg.hsvColor(0.5, sat=0.4), width=4)
@@ -809,6 +819,7 @@ class BenderWindow(QtGui.QMainWindow):
 
         try:
             self.updateOutputFrequency()
+            self.changeStimType(self.params.child('Stimulus','Type'), self.params['Stimulus', 'Type'])
             self.generateStimulus(showwarning=False)
             self.updateFileName()
 

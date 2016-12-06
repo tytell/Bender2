@@ -25,7 +25,7 @@ except AttributeError:
 class Ui_BenderWindow(object):
     def setupUi(self, BenderWindow):
         BenderWindow.setObjectName(_fromUtf8("BenderWindow"))
-        BenderWindow.resize(737, 694)
+        BenderWindow.resize(767, 694)
         self.centralwidget = QtGui.QWidget(BenderWindow)
         self.centralwidget.setObjectName(_fromUtf8("centralwidget"))
         self.verticalLayout_2 = QtGui.QVBoxLayout(self.centralwidget)
@@ -119,6 +119,8 @@ class Ui_BenderWindow(object):
         self.horizontalLayout_3.setObjectName(_fromUtf8("horizontalLayout_3"))
         self.plotYBox = QtGui.QComboBox(self.verticalLayoutWidget_2)
         self.plotYBox.setObjectName(_fromUtf8("plotYBox"))
+        self.plotYBox.addItem(_fromUtf8(""))
+        self.plotYBox.addItem(_fromUtf8(""))
         self.plotYBox.addItem(_fromUtf8(""))
         self.plotYBox.addItem(_fromUtf8(""))
         self.plotYBox.addItem(_fromUtf8(""))
@@ -242,6 +244,8 @@ class Ui_BenderWindow(object):
         self.plotYBox.setItemText(5, _translate("BenderWindow", "Y force", None))
         self.plotYBox.setItemText(6, _translate("BenderWindow", "Z force", None))
         self.plotYBox.setItemText(7, _translate("BenderWindow", "Z torque", None))
+        self.plotYBox.setItemText(8, _translate("BenderWindow", "Channel 4", None))
+        self.plotYBox.setItemText(9, _translate("BenderWindow", "Channel 5", None))
         self.label_4.setText(_translate("BenderWindow", "vs.", None))
         self.plotXBox.setItemText(0, _translate("BenderWindow", "Time (sec)", None))
         self.plotXBox.setItemText(1, _translate("BenderWindow", "Time (cycles)", None))
