@@ -92,6 +92,17 @@ class BenderFile(object):
             gout.attrs['Duration'] = stim['Duration']
             gout.attrs['WaitPre'] = params['Stimulus', 'Wait before']
             gout.attrs['WaitPost'] = params['Stimulus', 'Wait after']
+        elif params['Stimulus', 'Type'] == 'Ramp':
+            gout.attrs['Amplitude'] = stim['Amplitude']
+            gout.attrs['Rate'] = stim['Rate']
+            gout.attrs['HoldDur'] = stim['Hold duration']
+
+            gout.attrs['ActivationDuring'] = stim['Activation', 'During']
+            gout.attrs['ActivationDuration'] = stim['Activation', 'Duration']
+            gout.attrs['ActivationDelay'] = stim['Activation', 'Delay']
+            gout.attrs['ActivationPulseFreq'] = stim['Activation', 'Pulse rate']
+            gout.attrs['StimVoltage'] = stim['Activation', 'Stim voltage']
+            gout.attrs['StimSide'] = stim['Activation', 'Stim side']
 
         # save the whole parameter tree, in case I change something and forget to add it above
         gparams = self.h5file.create_group('ParameterTree')
@@ -100,7 +111,7 @@ class BenderFile(object):
     def saveRawData(self, aidata, encdata, params):
         gin = self.h5file.require_group('RawInput')
 
-        for i, aichan in enumerate(['xForce', 'yForce', 'zForce', 'xTorque', 'yTorque', 'zTorque']):
+        for i, aichan in enumerate(['xForce', 'yForce', 'zForce', 'xTorque', 'yTorque', 'zTorque', 'Left stim', 'Right stim']):
             dset = gin.create_dataset(aichan, data=aidata[:, i])
             dset.attrs['HardwareChannel'] = params['DAQ', 'Input', aichan]
 

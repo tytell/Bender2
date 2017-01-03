@@ -53,7 +53,44 @@ stimParameterDefs = {
         {'name': 'Duration', 'type': 'float', 'value': 300.0, 'suffix': 'sec'},
         {'name': 'Amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'deg'},
         {'name': 'Frequency exponent', 'type': 'float', 'value': 0.0, 'limits': (-1, 0)}
+    ],
+    'Ramp': [
+        {'name': 'Amplitude', 'type': 'float', 'value': 10.0, 'step': 1.0, 'suffix': 'deg'},
+        {'name': 'Rate', 'type': 'float', 'value': 50.0, 'step': 10.0, 'suffix': 'deg/s'},
+        {'name': 'Hold duration', 'type': 'float', 'value': 2.0, 'step': 0.5, 'suffix': 'sec'},
+        {'name': 'Activation', 'type': 'group', 'children': [
+            {'name': 'During', 'type': 'list', 'values': ['Hold', 'Ramp'], 'value': 'Hold'},
+            {'name': 'Duration', 'type': 'float', 'value': 0.3, 'step': 0.1, 'suffix': 'sec'},
+            {'name': 'Delay', 'type': 'float', 'value': 0.05, 'step': 0.01, 'suffix': 'sec', 'siPrefix': True},
+            {'name': 'Stim side', 'type': 'list', 'values': ['Left', 'Right'], 'value': 'Left'},
+            {'name': 'Stim voltage', 'type': 'float', 'value': 2.0, 'step': 1.0, 'suffix': 'V'},
+            {'name': 'Left voltage scale', 'type': 'float', 'value': 1.0, 'step': 1.0, 'suffix': 'V/V'},
+            {'name': 'Right voltage scale', 'type': 'float', 'value': 0.4, 'step': 1.0, 'suffix': 'V/V'},
+            {'name': 'Pulse rate', 'type': 'float', 'value': 75.0, 'step': 5.0, 'suffix': 'Hz'},
+        ]}
     ]
+}
+
+fileNameTips = {
+    'None': '''{tp}: None''',
+    'Sine': '''{tp} 'sin',
+{f}: Frequency,
+{a}: Amplitude,
+{ph}: Phase,
+{lv}: Left voltage,
+{rv}: Right voltage,
+{num}: Trial number''',
+    'Frequency sweep': '''{tp}: 'freqsweep',
+{a}: Amplitude,
+{f0}: Start frequency,
+{f1}: End frequency,
+{num}: Trial number''',
+    'Ramp': '''{tp}: 'ramp',
+{a}: stim['Amplitude'],
+{r}: Rate,
+{v}: Stim voltage,
+{s}: Stim side,
+{num}: Trial number'''
 }
 
 velocityDriverParams = [
@@ -62,15 +99,21 @@ velocityDriverParams = [
      'suffix': 'Hz'},
     {'name': 'Maximum pulse frequency', 'type': 'float', 'value': 5000.0, 'step': 100.0, 'siPrefix': True,
      'suffix': 'Hz'},
+    {'name': 'Sign convention', 'type': 'list', 'values': ['Left is positive', 'Left is negative', 'None'],
+     'value': 'Left is positive'}
 ]
 
 stepperParams = [
-    {'name': 'Steps per revolution', 'type': 'float', 'value': 6400}
+    {'name': 'Steps per revolution', 'type': 'float', 'value': 6400},
+    {'name': 'Sign convention', 'type': 'list', 'values': ['Left is positive', 'Left is negative', 'None'],
+     'value': 'Left is positive'}
 ]
 
 encoderParams = [
     {'name': 'Encoder', 'type': 'str', 'value': 'Dev1/ctr0'},
-    {'name': 'Counts per revolution', 'type': 'int', 'value': 10000, 'limits': (1, 100000)}
+    {'name': 'Counts per revolution', 'type': 'int', 'value': 10000, 'limits': (1, 100000)},
+    {'name': 'Sign convention', 'type': 'list', 'values': ['Left is positive', 'Left is negative', 'None'],
+     'value': 'Left is positive'}
 ]
 
 pwmParams = [
@@ -89,6 +132,8 @@ parameterDefinitions = [
             {'name': 'xTorque', 'type': 'str', 'value': 'Dev1/ai3'},
             {'name': 'yTorque', 'type': 'str', 'value': 'Dev1/ai4'},
             {'name': 'zTorque', 'type': 'str', 'value': 'Dev1/ai5'},
+            {'name': 'Left stim', 'type': 'str', 'value': 'Dev1/ai6'},
+            {'name': 'Right stim', 'type': 'str', 'value': 'Dev1/ai7'},
             {'name': 'Get calibration...', 'type': 'action'},
             {'name': 'Calibration file', 'type': 'str', 'readonly': True}
         ]},
@@ -117,7 +162,7 @@ parameterDefinitions = [
         ]}
     ]},
     {'name': 'Stimulus', 'type': 'group', 'children': [
-        {'name': 'Type', 'type': 'list', 'values': ['None', 'Sine', 'Frequency Sweep'], 'value': 'Sine'},
+        {'name': 'Type', 'type': 'list', 'values': ['None', 'Sine', 'Frequency Sweep', 'Ramp'], 'value': 'Sine'},
         {'name': 'Parameters', 'type': 'group', 'children': stimParameterDefs['Sine']},
         {'name': 'Wait before', 'type': 'float', 'value': 1.0, 'suffix': 's'},
         {'name': 'Wait after', 'type': 'float', 'value': 1.0, 'suffix': 's'},
@@ -183,6 +228,7 @@ class BenderWindow(QtGui.QMainWindow):
 
         self.ui.plot1Widget.setLabel('left', "Angle", units='deg')
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
+        self.ui.plot1Widget.setToolTip('Left = positive')
 
         self.bender = BenderDAQ()
         self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
@@ -288,7 +334,7 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.goButton.clicked.disconnect(self.bender.abort)
         self.ui.goButton.clicked.connect(self.startAcquisition)
 
-        self.data0 = np.dot(self.bender.analog_in_data, self.calibration)
+        self.data0 = np.dot(self.bender.analog_in_data[:,:6], self.calibration)
         self.data = self.filterData()
 
         self.updatePlot()
@@ -670,6 +716,8 @@ class BenderWindow(QtGui.QMainWindow):
         self.curStimType = value
         self.generateStimulus()
 
+        self.ui.fileNamePatternEdit.setToolTip(fileNameTips[self.curStimType])
+
     def generateStimulus(self, showwarning=True):
         try:
             self.bender.make_stimulus(self.params)
@@ -735,7 +783,15 @@ class BenderWindow(QtGui.QMainWindow):
             data = SafeDict({'tp': 'freqsweep',
                              'a': stim['Amplitude'],
                              'f0': stim['Start frequency'],
-                             'f1': stim['End frequency']})
+                             'f1': stim['End frequency'],
+                             'num': self.ui.nextFileNumberBox.value()})
+        elif stimtype == 'Ramp':
+            data = SafeDict({'tp': 'ramp',
+                             'a': stim['Amplitude'],
+                             'r': stim['Rate'],
+                             'v': stim['Activation', 'Stim voltage'],
+                             's': stim['Activation', 'Stim side'],
+                             'num': self.ui.nextFileNumberBox.value()})
         else:
             assert False
 
