@@ -20,14 +20,7 @@ from bender_ui import Ui_BenderWindow
 from benderdaq import BenderDAQ
 from benderfile import BenderFile
 
-from settings import SETTINGS_FILE, MOTOR_TYPE, COUNTER_TYPE, EXPERIMENT_TYPE
-
-if EXPERIMENT_TYPE == 'isolated muscle':
-    from ergometer_params import stimParameterDefs, setup_parameters
-elif EXPERIMENT_TYPE == 'whole body':
-    from wholebody_params import stimParameterDefs, setup_parameters
-else:
-    raise ValueError('Unknown experiment type {}'.format(EXPERIMENT_TYPE))
+from settings import SETTINGS_FILE, EXPERIMENT_TYPE
 
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
@@ -61,22 +54,12 @@ fileNameTips = {
 # then python C:\Anaconda2\Lib\site-packages\PyQt4\uic\pyuic.py bender.ui -o bender_ui.py
 
 class BenderWindow(QtGui.QMainWindow):
-    plotNames = {'X torque': 3,
-                 'Y force': 1,
-                 'X force': 0,
-                 'Y torque': 4,
-                 'Z force': 2,
-                 'Z torque': 5}
-
     def __init__(self):
         super(BenderWindow, self).__init__()
 
         self.initUI()
 
-        self.params = Parameter.create(name='params', type='group', children=parameterDefinitions)
-        self.ui.parameterTreeWidget.setParameters(self.params, showTop=False)
-
-        setup_parameters(self.params)
+        self.setup_parameters()
 
         stimtype = self.params.child('Stimulus', 'Type')
         self.curStimType = stimtype.value()
@@ -95,10 +78,6 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.saveParametersButton.clicked.connect(self.saveParams)
         self.ui.loadParametersButton.clicked.connect(self.loadParams)
 
-        self.ui.plot1Widget.setLabel('left', "Angle", units='deg')
-        self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
-        self.ui.plot1Widget.setToolTip('Left = positive')
-
         self.bender = BenderDAQ()
         self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
         self.bender.sigDoneAcquiring.connect(self.endAcquisition)
@@ -115,14 +94,11 @@ class BenderWindow(QtGui.QMainWindow):
         ui.setupUi(self)
         self.ui = ui
 
-    def startAcquisition(self):
-        if self.calibration is None or self.calibration.size == 0:
-            ret = QtGui.QMessageBox.warning(self, "You need to have a calibration!", buttons=QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel,
-                                            defaultButton=QtGui.QMessageBox.Ok)
-            if ret == QtGui.QMessageBox.Cancel:
-                return
-            self.getCalibration()
+    def setup_parameters(self):
+        # don't call this one directly. Override it in a subclass
+        assert False
 
+    def startAcquisition(self):
         self.ui.goButton.setText('Abort')
         self.ui.goButton.clicked.disconnect(self.startAcquisition)
         self.ui.goButton.clicked.connect(self.bender.abort)
@@ -134,23 +110,8 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.fileNameLabel.setText(filename)
         self.curFileName = filename
 
-        self.encoderPlot = self.ui.plot1Widget.plot(pen='k')
-
-        self.plot2 = self.ui.plot2Widget.plot(pen='k', clear=True)
-        self.overlayPlot = self.ui.plot2Widget.plot(pen='r', clear=False)
-
-        self.ui.plot2Widget.setLabel('left', self.ui.plotYBox.currentText(), units='unscaled')
-        self.ui.plot2Widget.setLabel('bottom', "Time", units='sec')
-
-        yname = str(self.ui.plotYBox.currentText())
-        if yname in self.plotNames:
-            self.plotYNum = self.plotNames[yname]
-        elif 'X torque' in yname:
-            self.plotYNum = self.plotNames['X torque']
-        elif 'Y force' in yname:
-            self.plotYNum = self.plotNames['Y force']
-        else:
-            self.plotYNum = 0
+        self.anglePlot = self.ui.plot1Widget.plot(pen='k')
+        self.set_plot2()
 
         self.bender.start()
 
@@ -158,13 +119,16 @@ class BenderWindow(QtGui.QMainWindow):
         #                          y=self.bender.encoder_in_data, clear=True, pen='r')
         # self.ui.plot2Widget.setXLink(self.ui.plot1Widget)
 
-    def updateAcquisitionPlot(self, t, aidata, encdata):
+    def set_plot2(self):
+        assert False
+
+    def updateAcquisitionPlot(self, t, aidata, angdata):
         logging.debug('updatePlot')
         t = t.flatten()
-        encdata = encdata.flatten()
+        angdata = angdata.flatten()
         aidata = aidata.reshape((len(t), -1))
 
-        self.encoderPlot.setData(x=t, y=encdata)
+        self.anglePlot.setData(x=t, y=angdata)
         self.plot2.setData(x=t, y=aidata[:, self.plotYNum])
 
         logging.debug('updateAcquisitionPlot end')
@@ -173,9 +137,6 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.goButton.setText('Go')
         self.ui.goButton.clicked.disconnect(self.bender.abort)
         self.ui.goButton.clicked.connect(self.startAcquisition)
-
-        self.data0 = np.dot(self.bender.analog_in_data[:,:6], self.calibration)
-        self.data = self.filterData()
 
         self.updatePlot()
 
@@ -301,28 +262,7 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.plot2Widget.setLabel('left', yname, units=yunit)
         self.ui.plot2Widget.setLabel('bottom', xname, units=xunit)
 
-        if xname == 'Time (sec)':
-            Lbrush = pg.mkBrush(pg.hsvColor(0.0, sat=0.4, alpha=0.3))
-            Rbrush = pg.mkBrush(pg.hsvColor(0.5, sat=0.4, alpha=0.3))
-
-            for onoff in self.bender.Lonoff:
-                leftplot = pg.LinearRegionItem(onoff, movable=False, brush=Lbrush)
-                self.ui.plot2Widget.addItem(leftplot)
-            for onoff in self.bender.Ronoff:
-                rightplot = pg.LinearRegionItem(onoff, movable=False, brush=Rbrush)
-                self.ui.plot2Widget.addItem(rightplot)
-        else:
-            Lpen = pg.mkPen(color=pg.hsvColor(0.0, sat=0.4), width=4)
-            Rpen = pg.mkPen(pg.hsvColor(0.5, sat=0.4), width=4)
-
-            t = self.bender.t
-            for onoff in self.bender.Lonoff:
-                ison = np.logical_and(t >= onoff[0], t < onoff[1])
-                self.ui.plot2Widget.plot(pen=Lpen, clear=False, x=x[ison], y=y[ison])
-
-            for onoff in self.bender.Ronoff:
-                ison = np.logical_and(t >= onoff[0], t < onoff[1])
-                self.ui.plot2Widget.plot(pen=Rpen, clear=False, x=x[ison], y=y[ison])
+        self.show_stim(x,y, xname, self.ui.plot2Widget)
 
         ymed = np.nanmedian(y)
         logging.debug('ymed={}'.format(ymed))
@@ -331,6 +271,9 @@ class BenderWindow(QtGui.QMainWindow):
 
         self.ui.plot2Widget.autoRange()
         logging.debug('changePlot end')
+
+    def show_stim(self, x,y, xname, plotwidget):
+        assert False
 
     def changePlotX(self, xind):
         xname = self.ui.plotXBox.itemText(xind)
@@ -438,31 +381,10 @@ class BenderWindow(QtGui.QMainWindow):
             self.ui.plot2Widget.hideAxis('right')
             self.ui.plot2Widget.autoRange()
 
-    def getBodyTorque(self, yname):
-        y, yunit = self.getY(yname)
-        if 'Body torque' in yname:
-            return y, yunit
-        elif yname == 'Z torque':
-            y = copy(y)
-            y *= (self.params['Geometry', 'dclamp']/2 + self.params['Geometry', 'douthoriz']) / self.params['Geometry','doutvert']
-            yunit = 'N m'
-
-            tnorm = self.bender.tnorm
-            y0 = np.mean(y[tnorm < 0])
-            y -= y0
-        elif yname == 'Y force':
-            y = copy(y)
-            y *= -(self.params['Geometry', 'dclamp']/2 + self.params['Geometry', 'douthoriz'])
-            yunit = 'N m'
-
-            tnorm = self.bender.tnorm
-            y0 = np.mean(y[tnorm < 0])
-            y -= y0
-        else:
-            logging.warning("Can't calculate body torque from %s", yname)
-        return y, yunit
-
     def getWork(self, yctr=None):
+        pass
+
+    def _calcWork(self, x, angle, y, yctr=None):
         tnorm = self.bender.tnorm
 
         maxcyc = np.max(tnorm)
@@ -470,14 +392,6 @@ class BenderWindow(QtGui.QMainWindow):
             maxcyc = np.ceil(maxcyc)
         else:
             maxcyc = np.floor(maxcyc)
-
-        angle = self.bender.encoder_in_data
-
-        yname = self.ui.plotYBox.currentText()
-        y, yunit = self.getBodyTorque(yname)
-
-        xname = self.ui.plotXBox.currentText()
-        x, xunit = self.getX(xname)
 
         if yctr is None:
             vr = self.ui.plot2Widget.viewRange()
@@ -503,42 +417,6 @@ class BenderWindow(QtGui.QMainWindow):
         outputPath = QtGui.QFileDialog.getExistingDirectory(self, "Choose output directory")
         if outputPath:
             self.ui.outputPathEdit.setText(outputPath)
-
-    def getCalibration(self):
-        calibrationFile = self.params['DAQ', 'Input', 'Calibration file']
-        if not calibrationFile:
-            calibrationFile = QtCore.QString()
-        calibrationFile = QtGui.QFileDialog.getOpenFileName(self, "Choose calibration file", directory=calibrationFile,
-                                                            filter="*.cal")
-        if calibrationFile:
-            self.params['DAQ', 'Input', 'Calibration file'] = calibrationFile
-
-            self.loadCalibration()
-
-    def loadCalibration(self):
-        calibrationFile = self.params['DAQ', 'Input', 'Calibration file']
-        if not calibrationFile:
-            return
-        if not os.path.exists(calibrationFile):
-            raise IOError("Calibration file %s not found", calibrationFile)
-
-        try:
-            tree = ElementTree.parse(calibrationFile)
-            cal = tree.getroot().find('Calibration')
-            if cal is None:
-                raise IOError('Not a calibration XML file')
-
-            mat = []
-            for ax in cal.findall('UserAxis'):
-                txt = ax.get('values')
-                row = [float(v) for v in txt.split()]
-                mat.append(row)
-
-        except IOError:
-            logging.warning('Bad calibration file')
-            return
-
-        self.calibration = np.array(mat).T
 
     def changeStimType(self, param, value):
         stimParamGroup = self.params.child('Stimulus', 'Parameters')
@@ -571,16 +449,8 @@ class BenderWindow(QtGui.QMainWindow):
         if self.bender.t is not None:
             self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos, clear=True)
             self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.vel, pen='r')
-            Lbrush = pg.mkBrush(pg.hsvColor(0.0, sat=0.4, alpha=0.3))
-            Rbrush = pg.mkBrush(pg.hsvColor(0.5, sat=0.4, alpha=0.3))
-            for onoff in self.bender.Lonoff:
-                self.ui.plot1Widget.addItem(pg.LinearRegionItem(onoff, movable=False, brush=Lbrush))
 
-            for onoff in self.bender.Ronoff:
-                self.ui.plot1Widget.addItem(pg.LinearRegionItem(onoff, movable=False, brush=Rbrush))
-
-            self.ui.plot2Widget.plot(x=self.bender.tout, y=self.bender.motorpulses, clear=True, pen='r')
-            self.ui.plot2Widget.plot(x=self.bender.tout, y=self.bender.motordirection, pen='b')
+            self.show_stim(self.bender.t, self.bender.pos, 'Time (sec)', self.ui.plot1Widget)
 
             self.ui.plot2Widget.setXLink(self.ui.plot1Widget)
 
@@ -592,8 +462,7 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.nextFileNameLabel.setText(filename)
 
     def updateOutputFrequency(self):
-        if MOTOR_TYPE == 'velocity':
-            self.params["DAQ", "Output", "Sampling frequency"] = self.params["Motor parameters", "Maximum pulse frequency"] * 2
+        pass
 
     def restartNumbering(self):
         self.ui.nextFileNumberBox.setValue(1)
@@ -783,16 +652,7 @@ class BenderWindow(QtGui.QMainWindow):
         event.accept()
 
 def main():
-    logging.basicConfig(level=logging.DEBUG)
-    app = QtGui.QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(True)
-
-    # settings = QtCore.QSettings('bender.ini', QtCore.QSettings.IniFormat)
-
-    bw2 = BenderWindow()
-    bw2.show()
-
-    return app.exec_()
+    print("Run the run_bender.py file instead")
 
 
 if __name__ == '__main__':

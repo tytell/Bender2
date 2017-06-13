@@ -6,7 +6,7 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>767</width>
+    <width>1028</width>
     <height>694</height>
    </rect>
   </property>
@@ -189,58 +189,7 @@
          <item>
           <layout class="QHBoxLayout" name="horizontalLayout_3">
            <item>
-            <widget class="QComboBox" name="plotYBox">
-             <item>
-              <property name="text">
-               <string>X torque</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Y force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Body torque from X torque</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Body torque from Y force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>X force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Y force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Z force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Z torque</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Channel 4</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Channel 5</string>
-              </property>
-             </item>
-            </widget>
+            <widget class="QComboBox" name="plotYBox"/>
            </item>
            <item>
             <widget class="QLabel" name="label_4">
@@ -250,28 +199,7 @@
             </widget>
            </item>
            <item>
-            <widget class="QComboBox" name="plotXBox">
-             <item>
-              <property name="text">
-               <string>Time (sec)</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Time (cycles)</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Phase</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Angle</string>
-              </property>
-             </item>
-            </widget>
+            <widget class="QComboBox" name="plotXBox"/>
            </item>
            <item>
             <spacer name="horizontalSpacer_3">
