@@ -3,7 +3,7 @@ import sys
 import os
 import string
 import logging
-from PyQt4 import QtGui, QtCore
+from PyQt5 import QtGui, QtCore
 import xml.etree.ElementTree as ElementTree
 import pickle
 import numpy as np
@@ -16,9 +16,6 @@ from pyqtgraph.parametertree import Parameter, ParameterTree, ParameterItem, reg
 import pyqtgraph as pg
 
 from bender_ui import Ui_BenderWindow
-
-from benderdaq import BenderDAQ
-from benderfile import BenderFile
 
 from settings import SETTINGS_FILE, EXPERIMENT_TYPE
 
@@ -78,14 +75,12 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.saveParametersButton.clicked.connect(self.saveParams)
         self.ui.loadParametersButton.clicked.connect(self.loadParams)
 
-        self.bender = BenderDAQ()
-        self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
-        self.bender.sigDoneAcquiring.connect(self.endAcquisition)
-
         self.ui.goButton.clicked.connect(self.startAcquisition)
 
         self.workLabels = None
         self.activationPlot2 = None
+
+        self.benderFileClass = None
 
         self.readSettings()
 
@@ -142,10 +137,11 @@ class BenderWindow(QtGui.QMainWindow):
 
         filepath = str(self.ui.outputPathEdit.text())
         filename, ext = os.path.splitext(self.curFileName)
-        with BenderFile(os.path.join(filepath, filename + '.h5'), allowoverwrite=True) as benderFile:
+        with self.benderFileClass(os.path.join(filepath, filename + '.h5'), allowoverwrite=True) as benderFile:
             benderFile.setupFile(self.bender, self.params)
-            benderFile.saveRawData(self.bender.analog_in_data, self.bender.encoder_in_data, self.params)
-            benderFile.saveCalibratedData(self.data, self.calibration, self.params)
+            benderFile.saveRawData(self.bender.analog_in_data, self.bender.angle_in_data, self.params)
+            if self.calibration is not None:
+                benderFile.saveCalibratedData(self.data, self.calibration, self.params)
 
         self.ui.nextFileNumberBox.setValue(self.ui.nextFileNumberBox.value() + 1)
 

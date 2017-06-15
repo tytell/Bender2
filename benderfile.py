@@ -43,23 +43,6 @@ class BenderFile(object):
         gout = self.h5file.create_group('Output')
         gout.attrs['SampleFrequency'] = params['DAQ', 'Output', 'Sampling frequency']
 
-        dset = gout.create_dataset('Lact', data=bender.Lact)
-        dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Left stimulus']
-        try:
-            dset.attrs['VoltScale'] = params['Stimulus', 'Parameters', 'Activation', 'Left voltage scale']
-        except KeyError:
-            pass
-
-        dset = gout.create_dataset('Ract', data=bender.Ract)
-        dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Right stimulus']
-        try:
-            dset.attrs['VoltScale'] = params['Stimulus', 'Parameters', 'Activation', 'Right voltage scale']
-        except KeyError:
-            pass
-
-        dset = gout.create_dataset('DigitalOut', data=bender.digital_out_data)
-        dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Digital port']
-
         # save the parameters for generating the stimulus
         gout = self.h5file.create_group('NominalStimulus')
         gout.create_dataset('Position', data=bender.pos)
@@ -68,6 +51,23 @@ class BenderFile(object):
         gout.create_dataset('t', data=bender.t)
         gout.create_dataset('tnorm', data=bender.tnorm)
 
+        try:
+            pertinfo = params.child('Stimulus', 'Perturbation')
+            dset = gout.create_dataset('Perturbation', data=bender.pert)
+            dset.attrs['Frequencies'] = bender.pertfreqs
+            dset.attrs['Amplitudes'] = bender.pertamps
+            dset.attrs['Phases'] = bender.pertphases
+            dset.attrs['MaxAmp'] = pertinfo['Max amplitude']
+            dset.attrs['MaxAmpUnits'] = pertinfo['Amplitude scale']
+            dset.attrs['AmplitudeFrequencyExponent'] = pertinfo['Amplitude frequency exponent']
+            dset.attrs['StartCycle'] = pertinfo['Start cycle']
+            dset.attrs['StopCycle'] = pertinfo['Stop cycle']
+            dset.attrs['RampCycles'] = pertinfo['Ramp duration']
+        except Exception:
+            pass
+
+        # save the stimulus info, but not the activation parameters, because those are different between the
+        # whole body rig and the ergometer setup
         stim = params.child('Stimulus', 'Parameters')
         if params['Stimulus', 'Type'] == 'Sine':
             gout.attrs['Amplitude'] = stim['Amplitude']
@@ -75,14 +75,6 @@ class BenderFile(object):
             gout.attrs['Cycles'] = stim['Cycles']
             gout.attrs['WaitPre'] = params['Stimulus', 'Wait before']
             gout.attrs['WaitPost'] = params['Stimulus', 'Wait after']
-
-            gout.attrs['ActivationOn'] = stim['Activation', 'On']
-            gout.attrs['ActivationDuty'] = stim['Activation', 'Duty']
-            gout.attrs['ActivationStartPhase'] = stim['Activation', 'Phase']
-            gout.attrs['ActivationStartCycle'] = stim['Activation', 'Start cycle']
-            gout.attrs['ActivationPulseFreq'] = stim['Activation', 'Pulse rate']
-            gout.attrs['Left voltage'] = stim['Activation', 'Left voltage']
-            gout.attrs['Right voltage'] = stim['Activation', 'Right voltage']
         elif params['Stimulus', 'Type'] == 'Frequency Sweep':
             gout.attrs['Amplitude'] = stim['Amplitude']
             gout.attrs['StartFrequency'] = stim['Start frequency']
@@ -97,35 +89,15 @@ class BenderFile(object):
             gout.attrs['Rate'] = stim['Rate']
             gout.attrs['HoldDur'] = stim['Hold duration']
 
-            gout.attrs['ActivationDuring'] = stim['Activation', 'During']
-            gout.attrs['ActivationDuration'] = stim['Activation', 'Duration']
-            gout.attrs['ActivationDelay'] = stim['Activation', 'Delay']
-            gout.attrs['ActivationPulseFreq'] = stim['Activation', 'Pulse rate']
-            gout.attrs['StimVoltage'] = stim['Activation', 'Stim voltage']
-            gout.attrs['StimSide'] = stim['Activation', 'Stim side']
-
         # save the whole parameter tree, in case I change something and forget to add it above
         gparams = self.h5file.create_group('ParameterTree')
         self._writeParameters(gparams, params)
 
-    def saveRawData(self, aidata, encdata, params):
-        gin = self.h5file.require_group('RawInput')
-
-        for i, aichan in enumerate(['xForce', 'yForce', 'zForce', 'xTorque', 'yTorque', 'zTorque', 'Left stim', 'Right stim']):
-            dset = gin.create_dataset(aichan, data=aidata[:, i])
-            dset.attrs['HardwareChannel'] = params['DAQ', 'Input', aichan]
-
-        dset = gin.create_dataset('Encoder', data=encdata)
-        dset.attrs['HardwareChannel'] = params['DAQ', 'Input', 'Encoder']
-        dset.attrs['CountsPerRev'] = params['DAQ', 'Input', 'Counts per revolution']
+    def saveRawData(self, aidata, angdata, params):
+        assert False
 
     def saveCalibratedData(self, data, calibration, params):
-        gin = self.h5file.require_group('Calibrated')
-
-        for i, aichan in enumerate(['xForce', 'yForce', 'zForce', 'xTorque', 'yTorque', 'zTorque']):
-            dset = gin.create_dataset(aichan, data=data[:, i])
-
-        gin.create_dataset('CalibrationMatrix', data=calibration)
+        assert False
 
     def close(self):
         self.h5file.close()

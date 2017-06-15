@@ -6,7 +6,7 @@ stimParameterDefs = {
         {'name': 'Duration', 'type': 'float', 'value': 5.0, 'step': 1.0, 'suffix': 'sec'}
     ],
     'Sine': [
-        {'name': 'Amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'deg'},
+        {'name': 'Amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'mm'},
         {'name': 'Frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
         {'name': 'Cycles', 'type': 'int', 'value': 10},
         {'name': 'Activation', 'type': 'group', 'children': [
@@ -25,12 +25,12 @@ stimParameterDefs = {
         {'name': 'End frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
         {'name': 'Frequency change', 'type': 'list', 'values': ['Exponential','Linear'], 'value': 'Exponential'},
         {'name': 'Duration', 'type': 'float', 'value': 300.0, 'suffix': 'sec'},
-        {'name': 'Amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'deg'},
+        {'name': 'Amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'mm'},
         {'name': 'Frequency exponent', 'type': 'float', 'value': 0.0, 'limits': (-1, 0)}
     ],
     'Ramp': [
-        {'name': 'Amplitude', 'type': 'float', 'value': 10.0, 'step': 1.0, 'suffix': 'deg'},
-        {'name': 'Rate', 'type': 'float', 'value': 50.0, 'step': 10.0, 'suffix': 'deg/s'},
+        {'name': 'Amplitude', 'type': 'float', 'value': 10.0, 'step': 1.0, 'suffix': 'mm'},
+        {'name': 'Rate', 'type': 'float', 'value': 50.0, 'step': 10.0, 'suffix': 'mm/s'},
         {'name': 'Hold duration', 'type': 'float', 'value': 2.0, 'step': 0.5, 'suffix': 'sec'},
         {'name': 'Activation', 'type': 'group', 'children': [
             {'name': 'During', 'type': 'list', 'values': ['Hold', 'Ramp'], 'value': 'Hold'},
@@ -76,6 +76,11 @@ parameterDefinitions = [
         {'name': 'Parameters', 'type': 'group', 'children': stimParameterDefs['Sine']},
         {'name': 'Perturbations', 'type': 'group', 'children': [
             {'name': 'On', 'type': 'bool', 'value': False},
+            {'name': 'Start cycle', 'type': 'float', 'value': 4.0, 'step': 0.5},
+            {'name': 'Stop cycle', 'type': 'float', 'value': 0.0, 'step': 0.5,
+             'tip': 'Stop perturbations at cycle number. Negative numbers are cycles relative to the last one'},
+            {'name': 'Ramp cycles', 'type': 'float', 'value': 0.5, 'step': 0.1,
+             'tip': 'Ramp perturbations in over this period of time'},
             {'name': 'Max amplitude', 'type': 'float', 'value': 5, 'suffix': '%'},
             {'name': 'Amplitude scale', 'type': 'list', 'values': ['mm', '% fundamental'], 'value': '% fundamental'},
             {'name': 'Amplitude frequency exponent', 'type': float, 'value': 0.25, 'step': 0.25,

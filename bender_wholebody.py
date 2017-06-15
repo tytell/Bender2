@@ -3,7 +3,7 @@ import sys
 import os
 import string
 import logging
-from PyQt4 import QtGui, QtCore
+from PyQt5 import QtGui, QtCore
 import xml.etree.ElementTree as ElementTree
 import pickle
 import numpy as np
@@ -48,6 +48,12 @@ class BenderWindow_WholeBody(BenderWindow):
     def __init__(self):
         super(BenderWindow_WholeBody, self).__init__()
 
+        self.bender = BenderDAQ_WholeBody()
+        self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
+        self.bender.sigDoneAcquiring.connect(self.endAcquisition)
+
+        self.benderFileClass = BenderFile_WholeBody
+
         self.ui.plot1Widget.setLabel('left', "Angle", units='deg')
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
         self.ui.plot1Widget.setToolTip('Left = positive')
@@ -81,7 +87,8 @@ class BenderWindow_WholeBody(BenderWindow):
         self.params.child('Stimulus').sigTreeStateChanged.connect(self.generateStimulus)
         self.params.child('DAQ', 'Update rate').sigValueChanged.connect(self.generateStimulus)
         if MOTOR_TYPE == 'velocity':
-            self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.connect(self.updateOutputFrequency)
+            self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.connect(
+                self.updateOutputFrequency)
         elif MOTOR_TYPE == 'stepper':
             self.params.child('DAQ', 'Output', 'Sampling frequency').sigValueChanged.connect(self.generateStimulus)
 
@@ -97,7 +104,8 @@ class BenderWindow_WholeBody(BenderWindow):
                 self.params.child('Motor parameters', 'Maximum pulse frequency').sigValueChanged.disconnect(
                     self.updateOutputFrequency)
             elif MOTOR_TYPE == 'stepper':
-                self.params.child('DAQ', 'Output', 'Sampling frequency').sigValueChanged.disconnect(self.generateStimulus)
+                self.params.child('DAQ', 'Output', 'Sampling frequency').sigValueChanged.disconnect(
+                    self.generateStimulus)
 
             self.params.child('Motor parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
             self.params.child('DAQ', 'Input', 'Get calibration...').sigActivated.disconnect(self.getCalibration)
@@ -107,7 +115,8 @@ class BenderWindow_WholeBody(BenderWindow):
 
     def startAcquisition(self):
         if self.calibration is None or self.calibration.size == 0:
-            ret = QtGui.QMessageBox.warning(self, "You need to have a calibration!", buttons=QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel,
+            ret = QtGui.QMessageBox.warning(self, "You need to have a calibration!",
+                                            buttons=QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel,
                                             defaultButton=QtGui.QMessageBox.Ok)
             if ret == QtGui.QMessageBox.Cancel:
                 return
@@ -123,7 +132,7 @@ class BenderWindow_WholeBody(BenderWindow):
         self.ui.plot2Widget.setLabel('bottom', "Time", units='sec')
 
         self.ui.plotYBox.addItems(['X torque', 'Y force', 'Body torque from X torque', 'Body torque from Y force',
-                                   'X force', 'Z force', 'Z torque', 'Channel 4',' Channel 5'])
+                                   'X force', 'Z force', 'Z torque', 'Channel 4', ' Channel 5'])
         self.ui.plotXBox.addItems(['Time (sec)', 'Time (cycles)', 'Phase', 'Angle'])
 
         yname = str(self.ui.plotYBox.currentText())
@@ -137,12 +146,12 @@ class BenderWindow_WholeBody(BenderWindow):
             self.plotYNum = 0
 
     def endAcquisition(self):
-        self.data0 = np.dot(self.bender.analog_in_data[:,:6], self.calibration)
+        self.data0 = np.dot(self.bender.analog_in_data[:, :6], self.calibration)
         self.data = self.filterData()
 
         super(BenderWindow_WholeBody, self).endAcquisition()
 
-    def show_stim(self, x,y, xname, plotwidget):
+    def show_stim(self, x, y, xname, plotwidget):
         if xname == 'Time (sec)':
             Lbrush = pg.mkBrush(pg.hsvColor(0.0, sat=0.4, alpha=0.3))
             Rbrush = pg.mkBrush(pg.hsvColor(0.5, sat=0.4, alpha=0.3))
@@ -172,7 +181,8 @@ class BenderWindow_WholeBody(BenderWindow):
             return y, yunit
         elif yname == 'Z torque':
             y = copy(y)
-            y *= (self.params['Geometry', 'dclamp']/2 + self.params['Geometry', 'douthoriz']) / self.params['Geometry','doutvert']
+            y *= (self.params['Geometry', 'dclamp'] / 2 + self.params['Geometry', 'douthoriz']) / self.params[
+                'Geometry', 'doutvert']
             yunit = 'N m'
 
             tnorm = self.bender.tnorm
@@ -180,7 +190,7 @@ class BenderWindow_WholeBody(BenderWindow):
             y -= y0
         elif yname == 'Y force':
             y = copy(y)
-            y *= -(self.params['Geometry', 'dclamp']/2 + self.params['Geometry', 'douthoriz'])
+            y *= -(self.params['Geometry', 'dclamp'] / 2 + self.params['Geometry', 'douthoriz'])
             yunit = 'N m'
 
             tnorm = self.bender.tnorm
@@ -239,7 +249,8 @@ class BenderWindow_WholeBody(BenderWindow):
 
     def updateOutputFrequency(self):
         if MOTOR_TYPE == 'velocity':
-            self.params["DAQ", "Output", "Sampling frequency"] = self.params["Motor parameters", "Maximum pulse frequency"] * 2
+            self.params["DAQ", "Output", "Sampling frequency"] = self.params[
+                                                                     "Motor parameters", "Maximum pulse frequency"] * 2
 
 
 class BenderDAQ_WholeBody(BenderDAQ):
@@ -305,7 +316,8 @@ class BenderDAQ_WholeBody(BenderDAQ):
         if np.any(np.abs(velfrac) > 1):
             raise ValueError('Motion is too fast!')
 
-        motorpulserate = np.abs(velfrac) * (motorParams['Maximum pulse frequency'] - motorParams['Minimum pulse frequency']) \
+        motorpulserate = np.abs(velfrac) * (
+        motorParams['Maximum pulse frequency'] - motorParams['Minimum pulse frequency']) \
                          + motorParams['Minimum pulse frequency']
         motorpulsephase = integrate.cumtrapz(motorpulserate, x=tout, initial=0)
 
@@ -333,11 +345,12 @@ class BenderDAQ_WholeBody(BenderDAQ):
         t = self.t
 
         # make activation
-        actburstdur = stim['Activation','Duty']/100.0 / stim['Frequency']
-        actburstdur = np.floor(actburstdur * stim['Activation','Pulse rate'] * 2) / (stim['Activation','Pulse rate'] * 2)
+        actburstdur = stim['Activation', 'Duty'] / 100.0 / stim['Frequency']
+        actburstdur = np.floor(actburstdur * stim['Activation', 'Pulse rate'] * 2) / (
+        stim['Activation', 'Pulse rate'] * 2)
         actburstduty = actburstdur * stim['Frequency']
 
-        actpulsephase = t[np.logical_and(t > 0, t < actburstdur)] * stim['Activation','Pulse rate']
+        actpulsephase = t[np.logical_and(t > 0, t < actburstdur)] * stim['Activation', 'Pulse rate']
         burst = (np.mod(actpulsephase, 1) < 0.5).astype(np.float)
 
         bendphase = self.tnorm - 0.25
@@ -364,14 +377,14 @@ class BenderDAQ_WholeBody(BenderDAQ):
                              burst)
                 if stim['Activation', 'Right voltage'] != 0:
                     if any(bendphase >= c + actphase + 0.5):
-                        Ronoff.append(np.array([tstart, tend]) + 0.5/stim['Frequency'])
+                        Ronoff.append(np.array([tstart, tend]) + 0.5 / stim['Frequency'])
 
                     np.place(Ractcmd, np.logical_and(bendphase >= c + 0.5 + actphase,
                                                      bendphase < c + 0.5 + actphase + actburstduty),
                              burst)
 
-            Lactcmd = Lactcmd * stim['Activation','Left voltage'] / stim['Activation','Left voltage scale']
-            Ractcmd = Ractcmd * stim['Activation','Right voltage'] / stim['Activation','Right voltage scale']
+            Lactcmd = Lactcmd * stim['Activation', 'Left voltage'] / stim['Activation', 'Left voltage scale']
+            Ractcmd = Ractcmd * stim['Activation', 'Right voltage'] / stim['Activation', 'Right voltage scale']
 
         self.Lact = Lactcmd
         self.Ract = Ractcmd
@@ -397,10 +410,11 @@ class BenderDAQ_WholeBody(BenderDAQ):
         rampdur = amp / rate
 
         # make activation
-        actburstdur = stim['Activation','Duration']
-        actburstdur = np.ceil(actburstdur * stim['Activation','Pulse rate'] * 2) / (stim['Activation','Pulse rate'] * 2)
+        actburstdur = stim['Activation', 'Duration']
+        actburstdur = np.ceil(actburstdur * stim['Activation', 'Pulse rate'] * 2) / (
+        stim['Activation', 'Pulse rate'] * 2)
 
-        actpulsephase = t[np.logical_and(t > 0, t < actburstdur)] * stim['Activation','Pulse rate']
+        actpulsephase = t[np.logical_and(t > 0, t < actburstdur)] * stim['Activation', 'Pulse rate']
         burst = (np.mod(actpulsephase, 1) < 0.5).astype(np.float)
 
         Lactcmd = np.zeros_like(t)
@@ -411,13 +425,13 @@ class BenderDAQ_WholeBody(BenderDAQ):
         stimdelay = stim['Activation', 'Delay']
 
         if stim['Activation', 'During'] == 'Hold':
-            isact = np.logical_and(t > rampdur+stimdelay, t <= rampdur+stimdelay+actburstdur)
-            tstart = rampdur+stimdelay
-            tend = rampdur+stimdelay+actburstdur
+            isact = np.logical_and(t > rampdur + stimdelay, t <= rampdur + stimdelay + actburstdur)
+            tstart = rampdur + stimdelay
+            tend = rampdur + stimdelay + actburstdur
         elif stim['Activation', 'During'] == 'Ramp':
-            isact = np.logical_and(t > stimdelay, t <= actburstdur+stimdelay)
+            isact = np.logical_and(t > stimdelay, t <= actburstdur + stimdelay)
             tstart = stimdelay
-            tend = actburstdur+stimdelay
+            tend = actburstdur + stimdelay
 
         if stim['Activation', 'Stim side'] == 'Left':
             onoff = Lonoff
@@ -452,7 +466,7 @@ class BenderDAQ_WholeBody(BenderDAQ):
 
     def setup_input_channels(self):
         # analog input
-        assert(self.duration is not None)
+        assert (self.duration is not None)
 
         self.analog_in = daq.Task()
 
@@ -476,8 +490,8 @@ class BenderDAQ_WholeBody(BenderDAQ):
         self.analog_in.CreateAIVoltageChan(inputParams['Right stim'], 'Rstim', daq.DAQmx_Val_Cfg_Default,
                                            -10, 10, daq.DAQmx_Val_Volts, None)
 
-        self.ninsamps = int(1.0/self.params['DAQ', 'Update rate'] * inputParams['Sampling frequency'])
-        self.inputbufferlen = 2*self.ninsamps
+        self.ninsamps = int(1.0 / self.params['DAQ', 'Update rate'] * inputParams['Sampling frequency'])
+        self.inputbufferlen = 2 * self.ninsamps
         self.analog_in.CfgSampClkTiming("", inputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
                                         daq.DAQmx_Val_ContSamps, self.inputbufferlen)
 
@@ -485,14 +499,81 @@ class BenderDAQ_WholeBody(BenderDAQ):
         self.angle_in = daq.Task()
 
         self.angle_in.CreateCIAngEncoderChan(inputParams['Encoder'], 'encoder',
-                                               daq.DAQmx_Val_X4, False,
-                                               0, daq.DAQmx_Val_AHighBHigh,
-                                               daq.DAQmx_Val_Degrees,
-                                               inputParams['Counts per revolution'], 0, None)
+                                             daq.DAQmx_Val_X4, False,
+                                             0, daq.DAQmx_Val_AHighBHigh,
+                                             daq.DAQmx_Val_Degrees,
+                                             inputParams['Counts per revolution'], 0, None)
         self.angle_in.CfgSampClkTiming("ai/SampleClock", inputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
-                                         daq.DAQmx_Val_ContSamps, self.inputbufferlen)
+                                       daq.DAQmx_Val_ContSamps, self.inputbufferlen)
 
     def get_analog_output_names(self):
         outputParams = self.params.child('DAQ', 'Output')
 
         return [outputParams['Left stimulus'], outputParams['Right stimulus']], ['Lstim', 'Rstim']
+
+
+class BenderFile_WholeBody(BenderFile):
+    def __init__(self, *args, **kwargs):
+        super(BenderFile_WholeBody, self).__init__(*args, **kwargs)
+
+    def setupFile(self, bender, params):
+        super(BenderFile_WholeBody, self).setupFile(bender, params)
+
+        # add activation parameters
+        gout = self.h5file.require_group('Output')
+
+        dset = gout.create_dataset('Lact', data=bender.Lact)
+        dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Left stimulus']
+        try:
+            dset.attrs['VoltScale'] = params['Stimulus', 'Parameters', 'Activation', 'Left voltage scale']
+        except KeyError:
+            pass
+
+        dset = gout.create_dataset('Ract', data=bender.Ract)
+        dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Right stimulus']
+        try:
+            dset.attrs['VoltScale'] = params['Stimulus', 'Parameters', 'Activation', 'Right voltage scale']
+        except KeyError:
+            pass
+
+        dset = gout.create_dataset('DigitalOut', data=bender.digital_out_data)
+        dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Digital port']
+
+        stim = params.child('Stimulus', 'Parameters')
+        if params['Stimulus', 'Type'] == 'Sine':
+            gout.attrs['ActivationOn'] = stim['Activation', 'On']
+            gout.attrs['ActivationDuty'] = stim['Activation', 'Duty']
+            gout.attrs['ActivationStartPhase'] = stim['Activation', 'Phase']
+            gout.attrs['ActivationStartCycle'] = stim['Activation', 'Start cycle']
+            gout.attrs['ActivationPulseFreq'] = stim['Activation', 'Pulse rate']
+            gout.attrs['Left voltage'] = stim['Activation', 'Left voltage']
+            gout.attrs['Right voltage'] = stim['Activation', 'Right voltage']
+        elif params['Stimulus', 'Type'] == 'Ramp':
+            gout.attrs['ActivationDuring'] = stim['Activation', 'During']
+            gout.attrs['ActivationDuration'] = stim['Activation', 'Duration']
+            gout.attrs['ActivationDelay'] = stim['Activation', 'Delay']
+            gout.attrs['ActivationPulseFreq'] = stim['Activation', 'Pulse rate']
+            gout.attrs['StimVoltage'] = stim['Activation', 'Stim voltage']
+            gout.attrs['StimSide'] = stim['Activation', 'Stim side']
+
+    def saveRawData(self, aidata, encdata, params):
+        gin = self.h5file.require_group('RawInput')
+
+        for i, aichan in enumerate(['xForce', 'yForce', 'zForce', 'xTorque', 'yTorque', 'zTorque', 'Left stim', 'Right stim']):
+            dset = gin.create_dataset(aichan, data=aidata[:, i])
+            dset.attrs['HardwareChannel'] = params['DAQ', 'Input', aichan]
+
+        dset = gin.create_dataset('Encoder', data=encdata)
+        dset.attrs['HardwareChannel'] = params['DAQ', 'Input', 'Encoder']
+        dset.attrs['CountsPerRev'] = params['DAQ', 'Input', 'Counts per revolution']
+
+    def saveCalibratedData(self, data, calibration, params):
+        gin = self.h5file.require_group('Calibrated')
+
+        for i, aichan in enumerate(['xForce', 'yForce', 'zForce', 'xTorque', 'yTorque', 'zTorque']):
+            dset = gin.create_dataset(aichan, data=data[:, i])
+
+        gin.create_dataset('CalibrationMatrix', data=calibration)
+
+
+

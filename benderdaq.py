@@ -7,7 +7,7 @@ import logging
 import numpy as np
 from scipy import integrate, interpolate
 
-from PyQt4 import QtCore
+from PyQt5 import QtCore
 
 try:
     import PyDAQmx as daq
@@ -31,6 +31,14 @@ class BenderDAQ(QtCore.QObject):
         self.vel = None
         self.duration = None
         self.digital_out = None
+
+        self.pert = None
+        self.pertvel = None
+
+        self.angle_in = None
+        self.angle_in_data = None
+        self.digital_out = None
+        self.digital_out_data = None
 
     def make_stimulus(self, parameters):
         self.params = parameters
@@ -89,6 +97,10 @@ class BenderDAQ(QtCore.QObject):
         tnorm = t * stim['Frequency']
         tnorm[t < 0] = -1
         tnorm[t > stim['Cycles'] / stim['Frequency']] = np.ceil(np.max(tnorm))
+
+        self.make_perturbations()
+        pos += self.pert
+        vel += self.pertvel
 
         # upsample analog out
         self.tout = np.arange(0, dur, 1.0 / self.params['DAQ', 'Output', 'Sampling frequency']) + t[0]
@@ -256,6 +268,83 @@ class BenderDAQ(QtCore.QObject):
         self.tnorm = t
         self.phase = np.zeros_like(t)
         self.duration = totaldur
+
+    def make_perturbations(self):
+        t = self.t
+        dt = t[1] - t[0]
+        self.pert = np.zeros_like(t)
+        self.pertvel = np.zeros_like(t)
+
+        self.pertfreqs = []
+        self.pertamps = []
+        self.pertphases = []
+
+        try:
+            pertinfo = self.params.child('Stimulus', 'Perturbations')
+            basefreq = self.params['Stimulus', 'Parameters', 'Frequency']
+            ncycles = self.params['Stimulus', 'Parameters', 'Cycles']
+        except Exception:
+            return
+
+        if pertinfo['On']:
+            freqstr = pertinfo['Frequencies']
+            phasestr = pertinfo['Phases']
+            try:
+                freqs = np.array([float(f) for f in freqstr.split()])
+                phases = np.array([float(p) for p in phasestr.split()])
+            except ValueError:
+                logging.warning('Could not parse perturbation frequency string')
+                return
+
+            if len(phases) < len(freqs):
+                newphases = np.random.random(size=(len(freqs)-len(phases),))
+                phases.extend(newphases)
+
+                phasestr = ' '.join(['{:.3f}'.format(p) for p in phases])
+                pertinfo['Phases'] = phasestr
+            elif len(phases) > len(freqs):
+                phases = phases[:len(freqs)]
+                phasestr = ' '.join(['{:.3f}'.format(p) for p in phases])
+                pertinfo['Phases'] = phasestr
+
+            if pertinfo['Amplitude scale'] == '% fundamental':
+                maxamp = pertinfo['Max amplitude']/100.0 * self.params['Stimulus', 'Parameters', 'Amplitude']
+            else:
+                maxamp = pertinfo['Max amplitude']
+
+            amps = np.power(freqs, -pertinfo['Amplitude frequency exponent'])
+            amps = amps / amps[0] * maxamp
+
+            startcycle = pertinfo['Start cycle']
+            stopcycle = pertinfo['Stop cycle']
+            if stopcycle <= 0:
+                stopcycle += ncycles
+            rampcycles = pertinfo['Ramp duration']
+            rampsamples = int(rampcycles/basefreq / dt)
+
+            for a, f, p in zip(amps, freqs, phases):
+                pert1 = a * np.cos(2*np.pi*(f*t - p))
+                self.pert += pert1
+
+                pertvel1 = -2*np.pi*f*a * np.sin(2*np.pi*(f*t - p))
+                self.pertvel += pertvel1
+
+            pertramp = np.ones_like(t)
+
+            phase = t*basefreq
+            pertramp[t < startcycle - rampcycles] = 0.0
+            pertramp = np.place(pertramp, np.logical_and(phase >= startcycle - rampcycles, phase < startcycle),
+                                np.linspace(0.0, 1.0, rampsamples))
+            pertramp = np.place(pertramp, np.logical_and(phase > stopcycle, phase <= stopcycle + rampcycles),
+                                np.linspace(1.0, 0.0, rampsamples))
+            pertramp[t >= stopcycle + rampcycles] = 0.0
+
+            self.pert *= pertramp
+            self.pertvel *= pertramp
+
+            self.pertfreqs = freqs
+            self.pertamps = amps
+            self.pertphases = phases
 
     def make_motor_signal(self, t, pos, vel):
         assert False
