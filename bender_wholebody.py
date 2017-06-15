@@ -3,7 +3,7 @@ import sys
 import os
 import string
 import logging
-from PyQt5 import QtGui, QtCore
+from PyQt4 import QtGui, QtCore
 import xml.etree.ElementTree as ElementTree
 import pickle
 import numpy as np
@@ -20,7 +20,7 @@ from bender_ui import Ui_BenderWindow
 from benderdaq import BenderDAQ
 from benderfile import BenderFile
 from bender import BenderWindow
-from wholebody_params import parameterDefinitions, stepperParams, velocityDriverParams, encoderParams, pwmParams
+from wholebody_params import parameterDefinitions, stimParameterDefs, stepperParams, velocityDriverParams, encoderParams, pwmParams
 
 try:
     import PyDAQmx as daq
@@ -46,17 +46,19 @@ class BenderWindow_WholeBody(BenderWindow):
                  'Z torque': 5}
 
     def __init__(self):
+        self.bender = BenderDAQ_WholeBody()
+        self.benderFileClass = BenderFile_WholeBody
+        self.stimParameterDefs = stimParameterDefs
+
         super(BenderWindow_WholeBody, self).__init__()
 
-        self.bender = BenderDAQ_WholeBody()
         self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
         self.bender.sigDoneAcquiring.connect(self.endAcquisition)
-
-        self.benderFileClass = BenderFile_WholeBody
 
         self.ui.plot1Widget.setLabel('left', "Angle", units='deg')
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
         self.ui.plot1Widget.setToolTip('Left = positive')
+
 
     def setup_parameters(self):
         self.params = Parameter.create(name='params', type='group', children=parameterDefinitions)

@@ -3,7 +3,7 @@ import sys
 import os
 import string
 import logging
-from PyQt5 import QtGui, QtCore
+from PyQt4 import QtGui, QtCore
 import xml.etree.ElementTree as ElementTree
 import pickle
 import numpy as np
@@ -424,7 +424,7 @@ class BenderWindow(QtGui.QMainWindow):
                 stimParamGroup.restoreState(self.stimParamState[value], blockSignals=True)
             else:
                 stimParamGroup.clearChildren()
-                stimParamGroup.addChildren(stimParameterDefs[value])
+                stimParamGroup.addChildren(self.stimParameterDefs[value])
         finally:
             self.connectParameterSlots()
         self.curStimType = value
@@ -477,13 +477,22 @@ class BenderWindow(QtGui.QMainWindow):
                              'f': stim['Frequency'],
                              'a': stim['Amplitude'],
                              'ph': stim['Activation', 'Phase'],
-                             'lv': stim['Activation', 'Left voltage'],
-                             'rv': stim['Activation', 'Right voltage'],
                              'num': self.ui.nextFileNumberBox.value()})
+            try:
+                data['v'] = stim['Activation', 'Voltage']
+            except Exception:
+                pass
+
+            try:
+                data['lv'] = stim['Activation', 'Left voltage']
+                data['rv'] = stim['Activation', 'Right voltage']
+            except Exception:
+                pass
 
             if not stim['Activation', 'On']:
-                data[' lv'] = 0
+                data['lv'] = 0
                 data['rv'] = 0
+                data['v'] = 0
         elif stimtype == 'Frequency Sweep':
             data = SafeDict({'tp': 'freqsweep',
                              'a': stim['Amplitude'],
@@ -497,6 +506,15 @@ class BenderWindow(QtGui.QMainWindow):
                              'v': stim['Activation', 'Stim voltage'],
                              's': stim['Activation', 'Stim side'],
                              'num': self.ui.nextFileNumberBox.value()})
+            try:
+                data['v'] = stim['Activation', 'Voltage']
+            except Exception:
+                pass
+            try:
+                data['v'] = stim['Activation', 'Stim voltage']
+                data['s'] = stim['Activation', 'Stim side']
+            except Exception:
+                pass
         else:
             assert False
 
@@ -506,6 +524,7 @@ class BenderWindow(QtGui.QMainWindow):
                'ph': '02.0f',
                'lv': '.0f',
                'rv': '.0f',
+               'v': '.0f',
                'f0': '.1f',
                'f1': '.1f',
                'num': '03d'}
@@ -564,10 +583,10 @@ class BenderWindow(QtGui.QMainWindow):
 
             if settings.contains("Stimulus/Type"):
                 stimtype = str(settings.value("Stimulus/Type").toString())
-                if stimtype in stimParameterDefs:
+                if stimtype in self.stimParameterDefs:
                     stimParamGroup = self.params.child('Stimulus', 'Parameters')
                     stimParamGroup.clearChildren()
-                    stimParamGroup.addChildren(stimParameterDefs[stimtype])
+                    stimParamGroup.addChildren(self.stimParameterDefs[stimtype])
                 else:
                     assert False
                 self.curStimType = stimtype

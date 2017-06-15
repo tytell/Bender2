@@ -7,7 +7,7 @@ import logging
 import numpy as np
 from scipy import integrate, interpolate
 
-from PyQt5 import QtCore
+from PyQt4 import QtCore
 
 try:
     import PyDAQmx as daq
@@ -99,8 +99,9 @@ class BenderDAQ(QtCore.QObject):
         tnorm[t > stim['Cycles'] / stim['Frequency']] = np.ceil(np.max(tnorm))
 
         self.make_perturbations()
-        pos += self.pert
-        vel += self.pertvel
+        if self.pert is not None:
+            pos += self.pert
+            vel += self.pertvel
 
         # upsample analog out
         self.tout = np.arange(0, dur, 1.0 / self.params['DAQ', 'Output', 'Sampling frequency']) + t[0]
@@ -270,14 +271,18 @@ class BenderDAQ(QtCore.QObject):
         self.duration = totaldur
 
     def make_perturbations(self):
-        t = self.t
-        dt = t[1] - t[0]
-        self.pert = np.zeros_like(t)
-        self.pertvel = np.zeros_like(t)
-
         self.pertfreqs = []
         self.pertamps = []
         self.pertphases = []
+
+        if self.t is None:
+            return
+
+        t = self.t
+        dt = t[1] - t[0]
+
+        self.pert = np.zeros_like(t)
+        self.pertvel = np.zeros_like(t)
 
         try:
             pertinfo = self.params.child('Stimulus', 'Perturbations')

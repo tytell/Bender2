@@ -4,13 +4,15 @@ import numpy as np
 from scipy import signal, integrate, interpolate
 from copy import copy
 
+from PyQt4 import QtCore, QtGui
+
 from pyqtgraph.parametertree import Parameter, ParameterTree, ParameterItem, registerParameterType
 import pyqtgraph as pg
 
 from benderdaq import BenderDAQ
 from benderfile import BenderFile
 from bender import BenderWindow
-from ergometer_params import parameterDefinitions
+from ergometer_params import parameterDefinitions, stimParameterDefs
 
 try:
     import PyDAQmx as daq
@@ -31,13 +33,14 @@ class BenderWindow_Ergometer(BenderWindow):
                  'Stim': 2}
 
     def __init__(self):
+        self.bender = BenderDAQ_Ergometer()
+        self.stimParameterDefs = stimParameterDefs
+        self.benderFileClass = BenderFile_Ergometer
+
         super(BenderWindow_Ergometer, self).__init__()
 
-        self.bender = BenderDAQ_Ergometer()
         self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
         self.bender.sigDoneAcquiring.connect(self.endAcquisition)
-
-        self.benderFileClass = BenderFile_Ergometer
 
         self.ui.plot1Widget.setLabel('left', "Length", units='mm')
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
@@ -53,8 +56,10 @@ class BenderWindow_Ergometer(BenderWindow):
         self.params.child('DAQ', 'Update rate').sigValueChanged.connect(self.generateStimulus)
 
         self.params.child('Motor parameters').sigTreeStateChanged.connect(self.generateStimulus)
-        self.params.child('Stimulus', 'Perturbations', 'Load frequencies...').sigActivated.connect(self.loadPerturbationFreqs)
-        self.params.child('Stimulus', 'Perturbations', 'Randomize phases...').sigActivated.connect(self.randPerturbationPhases)
+        self.params.child('Stimulus', 'Perturbations', 'Load frequencies...').sigActivated\
+            .connect(self.loadPerturbationFreqs)
+        self.params.child('Stimulus', 'Perturbations', 'Randomize phases...').sigActivated\
+            .connect(self.randPerturbationPhases)
 
     def disconnectParameterSlots(self):
         try:
@@ -71,6 +76,27 @@ class BenderWindow_Ergometer(BenderWindow):
             logging.warning('Problem disconnecting parameter slots')
             pass
 
+    def loadPerturbationFreqs(self):
+        fn = QtGui.QFileDialog.getOpenFileName(self, 'Choose perturbation frequency file...')
+
+        freqs = []
+        with open(fn, "r") as f:
+            ln = f.readline()
+            freqs.append(ln)
+
+        freqstr = ' '.join(freqs)
+        self.params['Stimulus', 'Perturbations', 'Frequencies'] = freqstr
+
+    def randPerturbationPhases(self):
+        freqs = self.params['Stimulus', 'Perturbations', 'Frequencies'].split()
+
+        phases = np.random.rand(len(freqs))
+        phasestr = ' '.join(['{:.3f}'.format(p) for p in phases])
+        self.params['Stimulus', 'Perturbations', 'Phases'] = phasestr
+
+    def loadCalibration(self):
+        pass
+    
     def set_plot2(self):
         self.plot2 = self.ui.plot2Widget.plot(pen='k', clear=True)
         self.overlayPlot = self.ui.plot2Widget.plot(pen='r', clear=False)
@@ -233,7 +259,7 @@ class BenderDAQ_Ergometer(BenderDAQ):
     def make_motor_signal(self, t, pos, vel):
         self.lengthcmd = interpolate.interp1d(t, pos, kind='linear', assume_sorted=True, bounds_error=False,
                                               fill_value=0.0)(self.tout)
-        self.lengthcmd = self.lengthcmd / self.params['DAQ', 'Motor parameters', 'Length scale']
+        self.lengthcmd = self.lengthcmd / self.params['Motor parameters', 'Length scale']
 
     def setup_input_channels(self):
         # analog input
