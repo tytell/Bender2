@@ -80,9 +80,8 @@ class BenderWindow(QtGui.QMainWindow):
         self.workLabels = None
         self.activationPlot2 = None
 
-        self.benderFileClass = None
-
         self.readSettings()
+        self.set_plot2()
 
     def initUI(self):
         ui = Ui_BenderWindow()
@@ -120,10 +119,11 @@ class BenderWindow(QtGui.QMainWindow):
     def updateAcquisitionPlot(self, t, aidata, angdata):
         logging.debug('updatePlot')
         t = t.flatten()
-        angdata = angdata.flatten()
         aidata = aidata.reshape((len(t), -1))
 
-        self.anglePlot.setData(x=t, y=angdata)
+        if angdata.size != 0:
+            angdata = angdata.flatten()
+            self.anglePlot.setData(x=t, y=angdata)
         self.plot2.setData(x=t, y=aidata[:, self.plotYNum])
 
         logging.debug('updateAcquisitionPlot end')
@@ -224,9 +224,9 @@ class BenderWindow(QtGui.QMainWindow):
             yunit = 'V'
         elif str(yname) in self.plotNames:
             y = self.data[:, self.plotNames[str(yname)]]
-            if 'force' in yname:
+            if 'force' in yname.lower():
                 yunit = 'N'
-            elif 'torque' in yname:
+            elif 'torque' in yname.lower():
                 yunit = 'N m'
             else:
                 yunit = ''

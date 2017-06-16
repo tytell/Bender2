@@ -96,7 +96,16 @@ class BenderWindow_Ergometer(BenderWindow):
 
     def loadCalibration(self):
         pass
-    
+
+    def endAcquisition(self):
+        self.data0 = self.bender.analog_in_data
+        self.data0[:, self.plotNames['Length']] *= self.params['Motor parameters', 'Length scale']
+        self.data0[:, self.plotNames['Force']] *= self.params['DAQ', 'Input', 'Force scale']
+
+        self.data = self.filterData()
+
+        super(BenderWindow_Ergometer, self).endAcquisition()
+
     def set_plot2(self):
         self.plot2 = self.ui.plot2Widget.plot(pen='k', clear=True)
         self.overlayPlot = self.ui.plot2Widget.plot(pen='r', clear=False)
@@ -129,12 +138,15 @@ class BenderWindow_Ergometer(BenderWindow):
                 plotwidget.plot(pen=pen, clear=False, x=x[ison], y=y[ison])
 
     def getWork(self, yctr=None):
-        angle = self.bender.length_in_data
+        len = self.data[:, self.plotNames['Length']]
 
-        y = self.data[:, self.plotNames['Force']]
-        x = self.data[:, self.plotNames['Angle']]
+        yname = self.ui.plotYBox.currentText()
+        y, yunit = self.getY(yname)
 
-        self._calcWork(x, angle, y, yctr=yctr)
+        xname = self.ui.plotXBox.currentText()
+        x, xunit = self.getX(xname)
+
+        self._calcWork(x, len, y, yctr=yctr)
 
 
 class BenderDAQ_Ergometer(BenderDAQ):

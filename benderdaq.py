@@ -84,6 +84,7 @@ class BenderDAQ(QtCore.QObject):
 
         t = np.arange(0.0, dur, 1 / self.params['DAQ', 'Input', 'Sampling frequency']) - \
                self.params['Stimulus', 'Wait before']
+        self.t = t
 
         pos = stim['Amplitude'] * np.sin(2 * np.pi * stim['Frequency'] * t)
         pos[t < 0] = 0
@@ -521,8 +522,13 @@ class BenderDAQ(QtCore.QObject):
                 self.abort()
                 return
 
+            if self.angle_in_data is not None:
+                angleup = self.angle_in_data[0:self.updateNum+1, :]
+            else:
+                angleup = np.array([])
+
             self.sigUpdate.emit(self.t_buffer[0:self.updateNum+1, :], self.analog_in_data[0:self.updateNum+1, :, :],
-                                self.angle_in_data[0:self.updateNum+1, :])
+                                angleup)
 
             logging.debug('Read %d ai, %d ang' % (aibytesread.value, angbytesread.value))
             logging.debug('Wrote %d ao, %d dig' % (aobyteswritten.value, dobyteswritten.value))

@@ -59,7 +59,7 @@ parameterDefinitions = [
         ]},
         {'name': 'Output', 'type': 'group', 'children': [
             {'name': 'Sampling frequency', 'type': 'float', 'value': 10000.0, 'step': 1000.0, 'siPrefix': True,
-             'suffix': 'Hz', 'readonly': True},
+             'suffix': 'Hz', 'readonly': False},
             {'name': 'Length', 'type': 'str', 'value': 'Dev1/ao0'},
             {'name': 'Stimulus', 'type': 'str', 'value': 'Dev1/ao1'},
         ]},

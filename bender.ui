@@ -252,38 +252,7 @@
             </widget>
            </item>
            <item>
-            <widget class="QComboBox" name="plotYOverlayBox">
-             <item>
-              <property name="text">
-               <string>X torque</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Y force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>X force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Y force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Z force</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>Z torque</string>
-              </property>
-             </item>
-            </widget>
+            <widget class="QComboBox" name="plotYOverlayBox"/>
            </item>
            <item>
             <widget class="QLabel" name="label_6">
