@@ -3,6 +3,7 @@ import logging
 import numpy as np
 from scipy import signal, integrate, interpolate
 from copy import copy
+from itertools import dropwhile
 
 from PyQt4 import QtCore, QtGui
 
@@ -59,8 +60,17 @@ class BenderWindow_Ergometer(BenderWindow):
         self.params.child('Stimulus', 'Type').sigValueChanged.connect(self.changeStimType)
         self.params.child('Stimulus').sigTreeStateChanged.connect(self.generateStimulus)
         self.params.child('DAQ', 'Update rate').sigValueChanged.connect(self.generateStimulus)
+        self.params.child('DAQ', 'Output', 'Sampling frequency').sigValueChanged.connect(self.generateStimulus)
+        self.params.child('DAQ', 'Input', 'Sampling frequency').sigValueChanged.connect(self.generateStimulus)
 
         self.params.child('Motor parameters').sigTreeStateChanged.connect(self.generateStimulus)
+
+        try:
+            self.params.child('Stimulus', 'Parameters', 'Activation', 'Type').sigValueChanged\
+                .connect(self.changeActivationType)
+        except Exception as e:
+            logging.debug('Trouble with activation type: {}'.format(e))
+
         self.params.child('Stimulus', 'Perturbations', 'Load frequencies...').sigActivated\
             .connect(self.loadPerturbationFreqs)
         self.params.child('Stimulus', 'Perturbations', 'Randomize phases...').sigActivated\
@@ -71,8 +81,16 @@ class BenderWindow_Ergometer(BenderWindow):
             self.params.child('Stimulus', 'Type').sigValueChanged.disconnect(self.changeStimType)
             self.params.child('Stimulus').sigTreeStateChanged.disconnect(self.generateStimulus)
             self.params.child('DAQ', 'Update rate').sigValueChanged.disconnect(self.generateStimulus)
+            self.params.child('DAQ', 'Output', 'Sampling frequency').sigValueChanged.disconnect(self.generateStimulus)
+            self.params.child('DAQ', 'Input', 'Sampling frequency').sigValueChanged.disconnect(self.generateStimulus)
 
             self.params.child('Motor parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
+
+            try:
+                self.params.child('Stimulus', 'Parameters', 'Activation', 'Type').sigValueChanged \
+                    .disconnect(self.changeActivationType)
+            except Exception:
+                pass
             self.params.child('Stimulus', 'Perturbations', 'Load frequencies...').sigActivated.disconnect(
                 self.loadPerturbationFreqs)
             self.params.child('Stimulus', 'Perturbations', 'Randomize phases...').sigActivated.disconnect(
@@ -80,6 +98,28 @@ class BenderWindow_Ergometer(BenderWindow):
         except TypeError:
             logging.warning('Problem disconnecting parameter slots')
             pass
+
+    def changeStimType(self, param, value):
+        super(BenderWindow_Ergometer, self).changeStimType(param, value)
+
+        try:
+            p = self.params.child('Stimulus', 'Parameters', 'Activation', 'Type')
+        except Exception:
+            return
+
+        self.changeActivationType(p, p.value())
+
+    def changeActivationType(self, param, value):
+        actgp = self.params.child('Stimulus', 'Parameters', 'Activation')
+        if value == 'Generate train':
+            isreadonly = False
+        else:
+            isreadonly = True
+
+        iter = dropwhile(lambda x: x != param, actgp)
+        iter.next()
+        for p in iter:
+            p.setReadonly(isreadonly)
 
     def loadPerturbationFreqs(self):
         fn = QtGui.QFileDialog.getOpenFileName(self, 'Choose perturbation frequency file...')
@@ -156,7 +196,7 @@ class BenderWindow_Ergometer(BenderWindow):
         xname = self.ui.plotXBox.currentText()
         x, xunit = self.getX(xname)
 
-        self._calcWork(x, len, y, yctr=yctr)
+        self._calcWork(x, -len, y, yctr=yctr)
 
 
 class BenderDAQ_Ergometer(BenderDAQ):
@@ -165,6 +205,9 @@ class BenderDAQ_Ergometer(BenderDAQ):
 
     def make_sine_stimulus(self):
         super(BenderDAQ_Ergometer, self).make_sine_stimulus()
+
+        if self.t is None:
+            return
 
         stim = self.params.child('Stimulus', 'Parameters')
         dur = self.params['Stimulus', 'Wait before'] + stim['Cycles'] / stim['Frequency'] + \
@@ -195,7 +238,7 @@ class BenderDAQ_Ergometer(BenderDAQ):
                         tstart = t[k]
                         tend = tstart + actburstdur
 
-                        actcmd[k:k+pulsedur] = 1
+                        actcmd[k:k+pulsedur] = 5
                         actonoff.append([tstart, tend])
 
             elif stim['Activation', 'Type'] == 'Generate train':
@@ -216,6 +259,11 @@ class BenderDAQ_Ergometer(BenderDAQ):
                                  burst)
 
                 actcmd = actcmd * stim['Activation','Voltage'] / stim['Activation','Voltage scale']
+
+        if any(np.abs(self.lengthcmd) > 10):
+            QtGui.QMessageBox.warning(None, 'Warning', 'Movement is too large. Clipping')
+            self.lengthcmd[self.lengthcmd > 10.0] = 10.0
+            self.lengthcmd[self.lengthcmd < -10.0] = 10.0
 
         self.act = actcmd
         self.actonoff = np.array(actonoff)
@@ -264,7 +312,7 @@ class BenderDAQ_Ergometer(BenderDAQ):
         if stim['Activation', 'Type'] == 'Sync pulse':
             pulsedur = int(0.01 / dt)
             k = np.searchsorted(t, tstart)
-            actcmd[k:k+pulsedur] = 1
+            actcmd[k:k+pulsedur] = 5
         else:
             np.place(actcmd, isact, burst)
             actcmd = actcmd * stim['Activation', 'Voltage'] / stim['Activation', 'Voltage scale']
@@ -274,6 +322,11 @@ class BenderDAQ_Ergometer(BenderDAQ):
 
         acthi = interpolate.interp1d(t, actcmd, kind='linear', assume_sorted=True, bounds_error=False,
                                       fill_value=0.0)(tout)
+
+        if any(np.abs(self.lengthcmd) > 10):
+            QtGui.QMessageBox.warning(None, 'Warning', 'Movement is too large. Clipping')
+            self.lengthcmd[self.lengthcmd > 10.0] = 10.0
+            self.lengthcmd[self.lengthcmd < -10.0] = 10.0
 
         self.analog_out_data = np.row_stack((self.lengthcmd, acthi))
 
