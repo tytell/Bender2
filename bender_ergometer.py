@@ -46,6 +46,11 @@ class BenderWindow_Ergometer(BenderWindow):
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
         self.ui.plot1Widget.setToolTip('Longer = positive')
 
+    def initUI(self):
+        super(BenderWindow_Ergometer, self).initUI()
+        self.ui.plotYBox.addItems(['Force', 'Length', 'Stim'])
+        self.ui.plotXBox.addItems(['Time (sec)', 'Time (cycles)', 'Phase', 'Length'])
+
     def setup_parameters(self):
         self.params = Parameter.create(name='params', type='group', children=parameterDefinitions)
         self.ui.parameterTreeWidget.setParameters(self.params, showTop=False)
@@ -81,11 +86,17 @@ class BenderWindow_Ergometer(BenderWindow):
 
         freqs = []
         with open(fn, "r") as f:
-            ln = f.readline()
-            freqs.append(ln)
+            for ln in f:
+                try:
+                    ln = ln.strip()
+                    val = float(ln)         # check that it converts properly to a float
+                    freqs.append(ln)
+                except ValueError:
+                    pass                    # ignore lines that don't convert to floats
 
         freqstr = ' '.join(freqs)
         self.params['Stimulus', 'Perturbations', 'Frequencies'] = freqstr
+        self.randPerturbationPhases()
 
     def randPerturbationPhases(self):
         freqs = self.params['Stimulus', 'Perturbations', 'Frequencies'].split()
@@ -104,6 +115,8 @@ class BenderWindow_Ergometer(BenderWindow):
 
         self.data = self.filterData()
 
+        self.length_in_data = self.data[:, self.plotNames['Length']]
+
         super(BenderWindow_Ergometer, self).endAcquisition()
 
     def set_plot2(self):
@@ -112,9 +125,6 @@ class BenderWindow_Ergometer(BenderWindow):
 
         self.ui.plot2Widget.setLabel('left', self.ui.plotYBox.currentText(), units='unscaled')
         self.ui.plot2Widget.setLabel('bottom', "Time", units='sec')
-
-        self.ui.plotYBox.addItems(['Force', 'Length'])
-        self.ui.plotXBox.addItems(['Time (sec)', 'Time (cycles)', 'Phase', 'Length'])
 
         yname = str(self.ui.plotYBox.currentText())
         if yname in self.plotNames:
@@ -205,7 +215,7 @@ class BenderDAQ_Ergometer(BenderDAQ):
                                                          bendphase < c + actphase + actburstduty),
                                  burst)
 
-                    actcmd = actcmd * stim['Activation','Left voltage'] / stim['Activation','Left voltage scale']
+                actcmd = actcmd * stim['Activation','Voltage'] / stim['Activation','Voltage scale']
 
         self.act = actcmd
         self.actonoff = np.array(actonoff)
@@ -217,6 +227,9 @@ class BenderDAQ_Ergometer(BenderDAQ):
 
     def make_ramp_stimulus(self):
         super(BenderDAQ_Ergometer, self).make_ramp_stimulus()
+
+        if self.t is None:
+            return
 
         stim = self.params.child('Stimulus', 'Parameters')
         t = self.t
@@ -248,15 +261,14 @@ class BenderDAQ_Ergometer(BenderDAQ):
             tstart = stimdelay
             tend = actburstdur+stimdelay
 
-        if stim['Activation', 'On']:
-            if stim['Activation', 'Type'] == 'Sync pulse':
-                pulsedur = int(0.01 / dt)
-                k = np.searchsorted(t, tstart)
-                actcmd[k:k+pulsedur] = 1
-            else:
-                np.place(actcmd, isact, burst)
-                actcmd = actcmd * stim['Activation', 'Voltage'] / stim['Activation', 'Voltage scale']
-            actonoff.append([tstart, tend])
+        if stim['Activation', 'Type'] == 'Sync pulse':
+            pulsedur = int(0.01 / dt)
+            k = np.searchsorted(t, tstart)
+            actcmd[k:k+pulsedur] = 1
+        else:
+            np.place(actcmd, isact, burst)
+            actcmd = actcmd * stim['Activation', 'Voltage'] / stim['Activation', 'Voltage scale']
+        actonoff.append([tstart, tend])
 
         tout = self.tout
 

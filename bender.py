@@ -206,12 +206,16 @@ class BenderWindow(QtGui.QMainWindow):
         elif xname == 'Angle':
             x = self.bender.encoder_in_data
             xunit = 'deg'
+        elif xname == 'Length':
+            x = self.length_in_data
+            xunit = 'mm'
         else:
             assert False
 
         return x, xunit
 
     def getY(self, yname):
+        yn = str(yname)
         if yname == 'Body torque from X torque':
             y, yunit = self.getBodyTorque('X torque')
         elif yname == 'Body torque from Y force':
@@ -222,12 +226,16 @@ class BenderWindow(QtGui.QMainWindow):
         elif yname == 'Channel 5':
             y = self.bender.analog_in_data[:, 5]
             yunit = 'V'
-        elif str(yname) in self.plotNames:
-            y = self.data[:, self.plotNames[str(yname)]]
-            if 'force' in yname.lower():
+        elif yn in self.plotNames:
+            y = self.data[:, self.plotNames[yn]]
+            if 'force' in yn.lower():
                 yunit = 'N'
-            elif 'torque' in yname.lower():
+            elif 'torque' in yn.lower():
                 yunit = 'N m'
+            elif 'length' in yn.lower():
+                yunit = 'mm'
+            elif 'stim' in yn.lower():
+                yunit = 'V'
             else:
                 yunit = ''
                 logging.debug('Unrecognized y variable unit: %s', yname)
@@ -503,8 +511,6 @@ class BenderWindow(QtGui.QMainWindow):
             data = SafeDict({'tp': 'ramp',
                              'a': stim['Amplitude'],
                              'r': stim['Rate'],
-                             'v': stim['Activation', 'Stim voltage'],
-                             's': stim['Activation', 'Stim side'],
                              'num': self.ui.nextFileNumberBox.value()})
             try:
                 data['v'] = stim['Activation', 'Voltage']

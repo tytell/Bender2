@@ -59,6 +59,11 @@ class BenderWindow_WholeBody(BenderWindow):
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
         self.ui.plot1Widget.setToolTip('Left = positive')
 
+    def initUI(self):
+        super(BenderWindow_WholeBody, self).initUI()
+        self.ui.plotYBox.addItems(['X torque', 'Y force', 'Body torque from X torque', 'Body torque from Y force',
+                                   'X force', 'Z force', 'Z torque', 'Channel 4', ' Channel 5'])
+        self.ui.plotXBox.addItems(['Time (sec)', 'Time (cycles)', 'Phase', 'Angle'])
 
     def setup_parameters(self):
         self.params = Parameter.create(name='params', type='group', children=parameterDefinitions)
@@ -132,10 +137,6 @@ class BenderWindow_WholeBody(BenderWindow):
 
         self.ui.plot2Widget.setLabel('left', self.ui.plotYBox.currentText(), units='unscaled')
         self.ui.plot2Widget.setLabel('bottom', "Time", units='sec')
-
-        self.ui.plotYBox.addItems(['X torque', 'Y force', 'Body torque from X torque', 'Body torque from Y force',
-                                   'X force', 'Z force', 'Z torque', 'Channel 4', ' Channel 5'])
-        self.ui.plotXBox.addItems(['Time (sec)', 'Time (cycles)', 'Phase', 'Angle'])
 
         yname = str(self.ui.plotYBox.currentText())
         if yname in self.plotNames:
