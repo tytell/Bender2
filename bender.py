@@ -33,7 +33,7 @@ fileNameTips = {
 {lv}: Left voltage,
 {rv}: Right voltage,
 {num}: Trial number''',
-    'Frequency sweep': '''{tp}: 'freqsweep',
+    'Frequency Sweep': '''{tp}: 'freqsweep',
 {a}: Amplitude,
 {f0}: Start frequency,
 {f1}: End frequency,
