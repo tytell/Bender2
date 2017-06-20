@@ -123,6 +123,8 @@ class BenderWindow_Ergometer(BenderWindow):
 
     def loadPerturbationFreqs(self):
         fn = QtGui.QFileDialog.getOpenFileName(self, 'Choose perturbation frequency file...')
+        if fn is None:
+            return
 
         freqs = []
         with open(fn, "r") as f:
@@ -151,6 +153,8 @@ class BenderWindow_Ergometer(BenderWindow):
     def endAcquisition(self):
         self.data0 = self.bender.analog_in_data
         self.data0[:, self.plotNames['Length']] *= self.params['Motor parameters', 'Length scale']
+        self.data0[:, self.plotNames['Length']] += self.params['Motor parameters', 'Initial length'] - \
+                                                   self.data0[0, self.plotNames['Length']]
         self.data0[:, self.plotNames['Force']] *= self.params['DAQ', 'Input', 'Force scale']
 
         self.data = self.filterData()

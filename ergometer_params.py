@@ -66,6 +66,7 @@ parameterDefinitions = [
         {'name': 'Update rate', 'type': 'float', 'value': 10.0, 'suffix': 'Hz'}
     ]},
     {'name': 'Motor parameters', 'type': 'group', 'children': [
+        {'name': 'Initial length', 'type': 'float', 'value': 7.0, 'suffix': 'mm', 'step': 0.01},
         {'name': 'Length scale', 'type': 'float', 'value': 0.5, 'suffix': 'mm/V'},
         {'name': 'Sign convention', 'type': 'list',
          'values': ['Lengthening is positive', 'Lengthening is negative', 'None'],
