@@ -122,7 +122,7 @@ class BenderWindow_WholeBody(BenderWindow):
 
     def startAcquisition(self):
         if self.calibration is None or self.calibration.size == 0:
-            ret = QtGui.QMessageBox.warning(self, "You need to have a calibration!",
+            ret = QtGui.QMessageBox.warning(self, "Warning", "You need to have a calibration!",
                                             buttons=QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel,
                                             defaultButton=QtGui.QMessageBox.Ok)
             if ret == QtGui.QMessageBox.Cancel:
@@ -400,6 +400,14 @@ class BenderDAQ_WholeBody(BenderDAQ):
                                       fill_value=0.0)(self.tout)
 
         self.analog_out_data = np.row_stack((Lacthi, Racthi))
+
+    def make_freqsweep_stimulus(self):
+        super(BenderDAQ_WholeBody, self).make_freqsweep_stimulus()
+
+        stim = self.params.child('Stimulus', 'Parameters')
+        t = self.t
+
+        self.analog_out_data = np.zeros((2, len(self.tout)))
 
     def make_ramp_stimulus(self):
         super(BenderDAQ_WholeBody, self).make_ramp_stimulus()

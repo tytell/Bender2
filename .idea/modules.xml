@@ -2,7 +2,8 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/Ergometer.iml" filepath="$PROJECT_DIR$/.idea/Ergometer.iml" />
+      <module fileurl="file://C:\Code\WholeBody\.idea\Ergometer.iml" filepath="C:\Code\WholeBody\.idea\Ergometer.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/WholeBody.iml" filepath="$PROJECT_DIR$/.idea/WholeBody.iml" />
     </modules>
   </component>
 </project>

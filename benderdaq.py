@@ -132,6 +132,7 @@ class BenderDAQ(QtCore.QObject):
         totaldur = self.params['Stimulus', 'Wait before'] + stim['Duration'] + \
                    self.params['Stimulus', 'Wait after']
         self.duration = totaldur
+        self.nupdates = int(np.ceil(dur * self.params['DAQ', 'Update rate']))
 
         t = np.arange(0.0, totaldur, 1 / self.params['DAQ', 'Input', 'Sampling frequency']) - \
                self.params['Stimulus', 'Wait before']
@@ -146,8 +147,6 @@ class BenderDAQ(QtCore.QObject):
             lnk = 1/dur * (np.log(stim['End frequency']) - np.log(stim['Start frequency']))
 
             f = stim['Start frequency'] * np.exp(t * lnk)
-            f[t < 0] = np.nan
-            f[t > dur] = np.nan
 
             tnorm = 2*np.pi*stim['Start frequency'] * (np.exp(t * lnk) - 1)/lnk
 
@@ -161,12 +160,15 @@ class BenderDAQ(QtCore.QObject):
                   (stim['Frequency exponent'] * np.sin(tnorm) +
                    2*np.pi/lnk * f * np.cos(tnorm))
 
+            f[t < 0] = np.nan
+            f[t > dur] = np.nan
+
         elif sweeptype == 'Linear':
             k = (stim['End frequency'] - stim['Start frequency']) / dur
             f = stim['Start frequency'] + k * t
 
             f[t < 0] = np.nan
-            f[t > stim['Cycles'] / stim['Frequency']] = np.nan
+            f[t > stim['Duration']] = np.nan
 
             tnorm = 2*np.pi*(stim['Start frequency']*t + k/2 * np.power(t, 2))
 
@@ -371,12 +373,20 @@ class BenderDAQ(QtCore.QObject):
 
         # split the output data into blocks of noutsamps
         padlen = self.noutsamps*self.nupdates - self.analog_out_data.shape[1]
-        if padlen != 0:
+        if padlen > 0:
             self.analog_out_data = np.pad(self.analog_out_data, ((0, 0), (0, padlen)), mode='edge')
             if self.digital_out_data is not None:
-                self.digital_out_data = np.pad(self.digital_out_data, ((0, 0), (0, padlen)), mode='edge')
+                self.digital_out_data = np.pad(self.digital_out_data, ((0,), (padlen,)), mode='edge')
+        elif padlen < 0:
+            n = self.noutsamps*self.nupdates
+            self.analog_out_data = self.analog_out_data[:, :n]
+            if self.digital_out_data is not None:
+                self.digital_out_data = self.digital_out_data[:n]
 
         assert(self.analog_out_data.shape[1] == self.noutsamps*self.nupdates)
+
+        if len(self.t) != self.nupdates*self.ninsamps:
+            self.t = np.arange(self.nupdates*self.ninsamps) / self.params['DAQ', 'Input', 'Sampling frequency']
 
         self.analog_out_buffers = []
         self.digital_out_buffers = []
