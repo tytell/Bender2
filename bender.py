@@ -3,7 +3,7 @@ import sys
 import os
 import string
 import logging
-from PyQt5 import QtGui, QtCore
+from PyQt4 import QtGui, QtCore
 import xml.etree.ElementTree as ElementTree
 import pickle
 import numpy as np
@@ -33,7 +33,7 @@ fileNameTips = {
 {lv}: Left voltage,
 {rv}: Right voltage,
 {num}: Trial number''',
-    'Frequency sweep': '''{tp}: 'freqsweep',
+    'Frequency Sweep': '''{tp}: 'freqsweep',
 {a}: Amplitude,
 {f0}: Start frequency,
 {f1}: End frequency,
@@ -80,9 +80,8 @@ class BenderWindow(QtGui.QMainWindow):
         self.workLabels = None
         self.activationPlot2 = None
 
-        self.benderFileClass = None
-
         self.readSettings()
+        self.set_plot2()
 
     def initUI(self):
         ui = Ui_BenderWindow()
@@ -120,10 +119,11 @@ class BenderWindow(QtGui.QMainWindow):
     def updateAcquisitionPlot(self, t, aidata, angdata):
         logging.debug('updatePlot')
         t = t.flatten()
-        angdata = angdata.flatten()
         aidata = aidata.reshape((len(t), -1))
 
-        self.anglePlot.setData(x=t, y=angdata)
+        if angdata.size != 0:
+            angdata = angdata.flatten()
+            self.anglePlot.setData(x=t, y=angdata)
         self.plot2.setData(x=t, y=aidata[:, self.plotYNum])
 
         logging.debug('updateAcquisitionPlot end')
@@ -206,12 +206,16 @@ class BenderWindow(QtGui.QMainWindow):
         elif xname == 'Angle':
             x = self.bender.encoder_in_data
             xunit = 'deg'
+        elif xname == 'Length':
+            x = self.length_in_data
+            xunit = 'mm'
         else:
             assert False
 
         return x, xunit
 
     def getY(self, yname):
+        yn = str(yname)
         if yname == 'Body torque from X torque':
             y, yunit = self.getBodyTorque('X torque')
         elif yname == 'Body torque from Y force':
@@ -222,12 +226,16 @@ class BenderWindow(QtGui.QMainWindow):
         elif yname == 'Channel 5':
             y = self.bender.analog_in_data[:, 5]
             yunit = 'V'
-        elif str(yname) in self.plotNames:
-            y = self.data[:, self.plotNames[str(yname)]]
-            if 'force' in yname:
+        elif yn in self.plotNames:
+            y = self.data[:, self.plotNames[yn]]
+            if 'force' in yn.lower():
                 yunit = 'N'
-            elif 'torque' in yname:
+            elif 'torque' in yn.lower():
                 yunit = 'N m'
+            elif 'length' in yn.lower():
+                yunit = 'mm'
+            elif 'stim' in yn.lower():
+                yunit = 'V'
             else:
                 yunit = ''
                 logging.debug('Unrecognized y variable unit: %s', yname)
@@ -424,7 +432,7 @@ class BenderWindow(QtGui.QMainWindow):
                 stimParamGroup.restoreState(self.stimParamState[value], blockSignals=True)
             else:
                 stimParamGroup.clearChildren()
-                stimParamGroup.addChildren(stimParameterDefs[value])
+                stimParamGroup.addChildren(self.stimParameterDefs[value])
         finally:
             self.connectParameterSlots()
         self.curStimType = value
@@ -477,13 +485,22 @@ class BenderWindow(QtGui.QMainWindow):
                              'f': stim['Frequency'],
                              'a': stim['Amplitude'],
                              'ph': stim['Activation', 'Phase'],
-                             'lv': stim['Activation', 'Left voltage'],
-                             'rv': stim['Activation', 'Right voltage'],
                              'num': self.ui.nextFileNumberBox.value()})
+            try:
+                data['v'] = stim['Activation', 'Voltage']
+            except Exception:
+                pass
+
+            try:
+                data['lv'] = stim['Activation', 'Left voltage']
+                data['rv'] = stim['Activation', 'Right voltage']
+            except Exception:
+                pass
 
             if not stim['Activation', 'On']:
-                data[' lv'] = 0
+                data['lv'] = 0
                 data['rv'] = 0
+                data['v'] = 0
         elif stimtype == 'Frequency Sweep':
             data = SafeDict({'tp': 'freqsweep',
                              'a': stim['Amplitude'],
@@ -494,9 +511,16 @@ class BenderWindow(QtGui.QMainWindow):
             data = SafeDict({'tp': 'ramp',
                              'a': stim['Amplitude'],
                              'r': stim['Rate'],
-                             'v': stim['Activation', 'Stim voltage'],
-                             's': stim['Activation', 'Stim side'],
                              'num': self.ui.nextFileNumberBox.value()})
+            try:
+                data['v'] = stim['Activation', 'Voltage']
+            except Exception:
+                pass
+            try:
+                data['v'] = stim['Activation', 'Stim voltage']
+                data['s'] = stim['Activation', 'Stim side']
+            except Exception:
+                pass
         else:
             assert False
 
@@ -506,6 +530,7 @@ class BenderWindow(QtGui.QMainWindow):
                'ph': '02.0f',
                'lv': '.0f',
                'rv': '.0f',
+               'v': '.0f',
                'f0': '.1f',
                'f1': '.1f',
                'num': '03d'}
@@ -564,10 +589,10 @@ class BenderWindow(QtGui.QMainWindow):
 
             if settings.contains("Stimulus/Type"):
                 stimtype = str(settings.value("Stimulus/Type").toString())
-                if stimtype in stimParameterDefs:
+                if stimtype in self.stimParameterDefs:
                     stimParamGroup = self.params.child('Stimulus', 'Parameters')
                     stimParamGroup.clearChildren()
-                    stimParamGroup.addChildren(stimParameterDefs[stimtype])
+                    stimParamGroup.addChildren(self.stimParameterDefs[stimtype])
                 else:
                     assert False
                 self.curStimType = stimtype

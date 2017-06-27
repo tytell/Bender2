@@ -7,7 +7,7 @@ import logging
 import numpy as np
 from scipy import integrate, interpolate
 
-from PyQt5 import QtCore
+from PyQt4 import QtCore
 
 try:
     import PyDAQmx as daq
@@ -84,6 +84,7 @@ class BenderDAQ(QtCore.QObject):
 
         t = np.arange(0.0, dur, 1 / self.params['DAQ', 'Input', 'Sampling frequency']) - \
                self.params['Stimulus', 'Wait before']
+        self.t = t
 
         pos = stim['Amplitude'] * np.sin(2 * np.pi * stim['Frequency'] * t)
         pos[t < 0] = 0
@@ -99,8 +100,9 @@ class BenderDAQ(QtCore.QObject):
         tnorm[t > stim['Cycles'] / stim['Frequency']] = np.ceil(np.max(tnorm))
 
         self.make_perturbations()
-        pos += self.pert
-        vel += self.pertvel
+        if self.pert is not None:
+            pos += self.pert
+            vel += self.pertvel
 
         # upsample analog out
         self.tout = np.arange(0, dur, 1.0 / self.params['DAQ', 'Output', 'Sampling frequency']) + t[0]
@@ -130,6 +132,7 @@ class BenderDAQ(QtCore.QObject):
         totaldur = self.params['Stimulus', 'Wait before'] + stim['Duration'] + \
                    self.params['Stimulus', 'Wait after']
         self.duration = totaldur
+        self.nupdates = int(np.ceil(dur * self.params['DAQ', 'Update rate']))
 
         t = np.arange(0.0, totaldur, 1 / self.params['DAQ', 'Input', 'Sampling frequency']) - \
                self.params['Stimulus', 'Wait before']
@@ -144,8 +147,6 @@ class BenderDAQ(QtCore.QObject):
             lnk = 1/dur * (np.log(stim['End frequency']) - np.log(stim['Start frequency']))
 
             f = stim['Start frequency'] * np.exp(t * lnk)
-            f[t < 0] = np.nan
-            f[t > dur] = np.nan
 
             tnorm = 2*np.pi*stim['Start frequency'] * (np.exp(t * lnk) - 1)/lnk
 
@@ -159,12 +160,15 @@ class BenderDAQ(QtCore.QObject):
                   (stim['Frequency exponent'] * np.sin(tnorm) +
                    2*np.pi/lnk * f * np.cos(tnorm))
 
+            f[t < 0] = np.nan
+            f[t > dur] = np.nan
+
         elif sweeptype == 'Linear':
             k = (stim['End frequency'] - stim['Start frequency']) / dur
             f = stim['Start frequency'] + k * t
 
             f[t < 0] = np.nan
-            f[t > stim['Cycles'] / stim['Frequency']] = np.nan
+            f[t > stim['Duration']] = np.nan
 
             tnorm = 2*np.pi*(stim['Start frequency']*t + k/2 * np.power(t, 2))
 
@@ -270,14 +274,18 @@ class BenderDAQ(QtCore.QObject):
         self.duration = totaldur
 
     def make_perturbations(self):
-        t = self.t
-        dt = t[1] - t[0]
-        self.pert = np.zeros_like(t)
-        self.pertvel = np.zeros_like(t)
-
         self.pertfreqs = []
         self.pertamps = []
         self.pertphases = []
+
+        if self.t is None:
+            return
+
+        t = self.t
+        dt = t[1] - t[0]
+
+        self.pert = np.zeros_like(t)
+        self.pertvel = np.zeros_like(t)
 
         try:
             pertinfo = self.params.child('Stimulus', 'Perturbations')
@@ -300,7 +308,7 @@ class BenderDAQ(QtCore.QObject):
 
             if len(phases) < len(freqs):
                 newphases = np.random.random(size=(len(freqs)-len(phases),))
-                phases.extend(newphases)
+                phases = np.append(phases, newphases)
 
                 phasestr = ' '.join(['{:.3f}'.format(p) for p in phases])
                 pertinfo['Phases'] = phasestr
@@ -321,7 +329,7 @@ class BenderDAQ(QtCore.QObject):
             stopcycle = pertinfo['Stop cycle']
             if stopcycle <= 0:
                 stopcycle += ncycles
-            rampcycles = pertinfo['Ramp duration']
+            rampcycles = pertinfo['Ramp cycles']
             rampsamples = int(rampcycles/basefreq / dt)
 
             for a, f, p in zip(amps, freqs, phases):
@@ -334,12 +342,12 @@ class BenderDAQ(QtCore.QObject):
             pertramp = np.ones_like(t)
 
             phase = t*basefreq
-            pertramp[t < startcycle - rampcycles] = 0.0
-            pertramp = np.place(pertramp, np.logical_and(phase >= startcycle - rampcycles, phase < startcycle),
-                                np.linspace(0.0, 1.0, rampsamples))
-            pertramp = np.place(pertramp, np.logical_and(phase > stopcycle, phase <= stopcycle + rampcycles),
-                                np.linspace(1.0, 0.0, rampsamples))
-            pertramp[t >= stopcycle + rampcycles] = 0.0
+            pertramp[phase < startcycle - rampcycles] = 0.0
+            np.place(pertramp, np.logical_and(phase >= startcycle - rampcycles, phase < startcycle),
+                     np.linspace(0.0, 1.0, rampsamples))
+            np.place(pertramp, np.logical_and(phase > stopcycle, phase <= stopcycle + rampcycles),
+                     np.linspace(1.0, 0.0, rampsamples))
+            pertramp[phase >= stopcycle + rampcycles] = 0.0
 
             self.pert *= pertramp
             self.pertvel *= pertramp
@@ -411,12 +419,20 @@ class BenderDAQ(QtCore.QObject):
 
         # split the output data into blocks of noutsamps
         padlen = self.noutsamps*self.nupdates - self.analog_out_data.shape[1]
-        if padlen != 0:
+        if padlen > 0:
             self.analog_out_data = np.pad(self.analog_out_data, ((0, 0), (0, padlen)), mode='edge')
             if self.digital_out_data is not None:
-                self.digital_out_data = np.pad(self.digital_out_data, ((0, 0), (0, padlen)), mode='edge')
+                self.digital_out_data = np.pad(self.digital_out_data, ((0,), (padlen,)), mode='edge')
+        elif padlen < 0:
+            n = self.noutsamps*self.nupdates
+            self.analog_out_data = self.analog_out_data[:, :n]
+            if self.digital_out_data is not None:
+                self.digital_out_data = self.digital_out_data[:n]
 
         assert(self.analog_out_data.shape[1] == self.noutsamps*self.nupdates)
+
+        if len(self.t) != self.nupdates*self.ninsamps:
+            self.t = np.arange(self.nupdates*self.ninsamps) / self.params['DAQ', 'Input', 'Sampling frequency']
 
         self.analog_out_buffers = []
         self.digital_out_buffers = []
@@ -562,8 +578,13 @@ class BenderDAQ(QtCore.QObject):
                 self.abort()
                 return
 
+            if self.angle_in_data is not None:
+                angleup = self.angle_in_data[0:self.updateNum+1, :]
+            else:
+                angleup = np.array([])
+
             self.sigUpdate.emit(self.t_buffer[0:self.updateNum+1, :], self.analog_in_data[0:self.updateNum+1, :, :],
-                                self.angle_in_data[0:self.updateNum+1, :])
+                                angleup)
 
             logging.debug('Read %d ai, %d ang' % (aibytesread.value, angbytesread.value))
             logging.debug('Wrote %d ao, %d dig' % (aobyteswritten.value, dobyteswritten.value))
@@ -582,7 +603,8 @@ class BenderDAQ(QtCore.QObject):
             self.timer.timeout.disconnect(self.update)
 
             self.analog_in_data = np.reshape(self.analog_in_data, (-1, 8))
-            self.angle_in_data = np.reshape(self.angle_in_data, (-1,))
+            if self.angle_in_data is not None:
+                self.angle_in_data = np.reshape(self.angle_in_data, (-1,))
 
             del self.analog_in
             del self.angle_in
@@ -620,7 +642,8 @@ class BenderDAQ(QtCore.QObject):
                 logging.debug('Error stopping analog_out: {}'.format(err))
 
         self.analog_in_data = np.reshape(self.analog_in_data, (-1, 8))
-        self.angle_in_data = np.reshape(self.angle_in_data, (-1,))
+        if self.angle_in_data is not None:
+            self.angle_in_data = np.reshape(self.angle_in_data, (-1,))
 
         del self.analog_in
         del self.angle_in

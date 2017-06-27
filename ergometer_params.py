@@ -59,13 +59,14 @@ parameterDefinitions = [
         ]},
         {'name': 'Output', 'type': 'group', 'children': [
             {'name': 'Sampling frequency', 'type': 'float', 'value': 10000.0, 'step': 1000.0, 'siPrefix': True,
-             'suffix': 'Hz', 'readonly': True},
+             'suffix': 'Hz', 'readonly': False},
             {'name': 'Length', 'type': 'str', 'value': 'Dev1/ao0'},
             {'name': 'Stimulus', 'type': 'str', 'value': 'Dev1/ao1'},
         ]},
         {'name': 'Update rate', 'type': 'float', 'value': 10.0, 'suffix': 'Hz'}
     ]},
     {'name': 'Motor parameters', 'type': 'group', 'children': [
+        {'name': 'Initial length', 'type': 'float', 'value': 7.0, 'suffix': 'mm', 'step': 0.01},
         {'name': 'Length scale', 'type': 'float', 'value': 0.5, 'suffix': 'mm/V'},
         {'name': 'Sign convention', 'type': 'list',
          'values': ['Lengthening is positive', 'Lengthening is negative', 'None'],
@@ -90,13 +91,13 @@ perturbations = {
          'tip': 'Stop perturbations at cycle number. Negative numbers are cycles relative to the last one'},
         {'name': 'Ramp cycles', 'type': 'float', 'value': 0.5, 'step': 0.1,
          'tip': 'Ramp perturbations in over this period of time'},
-        {'name': 'Max amplitude', 'type': 'float', 'value': 5, 'suffix': '%'},
+            {'name': 'Max amplitude', 'type': 'float', 'value': 5.0, 'suffix': '%'},
         {'name': 'Amplitude scale', 'type': 'list', 'values': ['mm', '% fundamental'], 'value': '% fundamental'},
-        {'name': 'Amplitude frequency exponent', 'type': float, 'value': 0.25, 'step': 0.25,
+            {'name': 'Amplitude frequency exponent', 'type': 'float', 'value': 0.25, 'step': 0.25,
          'tip': 'Divide amplitudes by frequency to this exponent. 0 = no frequency scaling'},
-        {'name': 'Frequencies', 'type': 'string', 'value': ''},
+            {'name': 'Frequencies', 'type': 'str', 'value': ''},
         {'name': 'Load frequencies...', 'type': 'action'},
-        {'name': 'Phases', 'type': 'string', 'value': ''},
+            {'name': 'Phases', 'type': 'str', 'value': ''},
         {'name': 'Randomize phases...', 'type': 'action'},
     ],
     'Triangles': [

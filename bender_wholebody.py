@@ -3,7 +3,7 @@ import sys
 import os
 import string
 import logging
-from PyQt5 import QtGui, QtCore
+from PyQt4 import QtGui, QtCore
 import xml.etree.ElementTree as ElementTree
 import pickle
 import numpy as np
@@ -20,7 +20,7 @@ from bender_ui import Ui_BenderWindow
 from benderdaq import BenderDAQ
 from benderfile import BenderFile
 from bender import BenderWindow
-from wholebody_params import parameterDefinitions, stepperParams, velocityDriverParams, encoderParams, pwmParams
+from wholebody_params import parameterDefinitions, stimParameterDefs, stepperParams, velocityDriverParams, encoderParams, pwmParams
 
 try:
     import PyDAQmx as daq
@@ -46,17 +46,24 @@ class BenderWindow_WholeBody(BenderWindow):
                  'Z torque': 5}
 
     def __init__(self):
+        self.bender = BenderDAQ_WholeBody()
+        self.benderFileClass = BenderFile_WholeBody
+        self.stimParameterDefs = stimParameterDefs
+
         super(BenderWindow_WholeBody, self).__init__()
 
-        self.bender = BenderDAQ_WholeBody()
         self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
         self.bender.sigDoneAcquiring.connect(self.endAcquisition)
-
-        self.benderFileClass = BenderFile_WholeBody
 
         self.ui.plot1Widget.setLabel('left', "Angle", units='deg')
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
         self.ui.plot1Widget.setToolTip('Left = positive')
+
+    def initUI(self):
+        super(BenderWindow_WholeBody, self).initUI()
+        self.ui.plotYBox.addItems(['X torque', 'Y force', 'Body torque from X torque', 'Body torque from Y force',
+                                   'X force', 'Z force', 'Z torque', 'Channel 4', ' Channel 5'])
+        self.ui.plotXBox.addItems(['Time (sec)', 'Time (cycles)', 'Phase', 'Angle'])
 
     def setup_parameters(self):
         self.params = Parameter.create(name='params', type='group', children=parameterDefinitions)
@@ -115,7 +122,7 @@ class BenderWindow_WholeBody(BenderWindow):
 
     def startAcquisition(self):
         if self.calibration is None or self.calibration.size == 0:
-            ret = QtGui.QMessageBox.warning(self, "You need to have a calibration!",
+            ret = QtGui.QMessageBox.warning(self, "Warning", "You need to have a calibration!",
                                             buttons=QtGui.QMessageBox.Ok | QtGui.QMessageBox.Cancel,
                                             defaultButton=QtGui.QMessageBox.Ok)
             if ret == QtGui.QMessageBox.Cancel:
@@ -130,10 +137,6 @@ class BenderWindow_WholeBody(BenderWindow):
 
         self.ui.plot2Widget.setLabel('left', self.ui.plotYBox.currentText(), units='unscaled')
         self.ui.plot2Widget.setLabel('bottom', "Time", units='sec')
-
-        self.ui.plotYBox.addItems(['X torque', 'Y force', 'Body torque from X torque', 'Body torque from Y force',
-                                   'X force', 'Z force', 'Z torque', 'Channel 4', ' Channel 5'])
-        self.ui.plotXBox.addItems(['Time (sec)', 'Time (cycles)', 'Phase', 'Angle'])
 
         yname = str(self.ui.plotYBox.currentText())
         if yname in self.plotNames:
@@ -397,6 +400,14 @@ class BenderDAQ_WholeBody(BenderDAQ):
                                       fill_value=0.0)(self.tout)
 
         self.analog_out_data = np.row_stack((Lacthi, Racthi))
+
+    def make_freqsweep_stimulus(self):
+        super(BenderDAQ_WholeBody, self).make_freqsweep_stimulus()
+
+        stim = self.params.child('Stimulus', 'Parameters')
+        t = self.t
+
+        self.analog_out_data = np.zeros((2, len(self.tout)))
 
     def make_ramp_stimulus(self):
         super(BenderDAQ_WholeBody, self).make_ramp_stimulus()

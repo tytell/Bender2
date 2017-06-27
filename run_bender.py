@@ -1,7 +1,7 @@
 from __future__ import print_function, unicode_literals
 import sys
 import logging
-from PyQt5 import QtGui, QtCore
+from PyQt4 import QtGui, QtCore
 
 from settings import EXPERIMENT_TYPE
 
@@ -14,6 +14,7 @@ elif EXPERIMENT_TYPE == 'isolated muscle':
 else:
     raise ValueError('Unknown experiment type {}'.format(EXPERIMENT_TYPE))
 
+
 def main():
     logging.basicConfig(level=logging.DEBUG)
     app = QtGui.QApplication(sys.argv)
@@ -23,3 +24,9 @@ def main():
     bw2.show()
 
     return app.exec_()
+
+
+if __name__ == '__main__':
+    sys.exit(main())
+
+
