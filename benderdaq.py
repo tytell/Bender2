@@ -286,7 +286,9 @@ class BenderDAQ(QtCore.QObject):
         except Exception:
             return
 
-        if pertinfo['On']:
+        if pertinfo['Type'] == 'None':
+            return
+        elif pertinfo['Type'] == 'Sines':
             freqstr = pertinfo['Frequencies']
             phasestr = pertinfo['Phases']
             try:
@@ -345,6 +347,50 @@ class BenderDAQ(QtCore.QObject):
             self.pertfreqs = freqs
             self.pertamps = amps
             self.pertphases = phases
+
+        elif pertinfo['Type'] == 'Triangles':
+            startcycle = pertinfo['Start cycle']
+            amp = pertinfo['Amplitude']
+            dur = pertinfo['Duration']
+            reps = pertinfo['Repetitions']
+            gap = pertinfo['Delay in between']
+
+            totaltridur = startcycle/basefreq + (dur + gap/basefreq)*reps
+            if totaltridur > ncycles/basefreq:
+                reps = np.floor((ncycles/basefreq - startcycle/basefreq) / (dur + gap/basefreq))
+                logging.warning('Only time to do {} triangles'.format(reps))
+
+                if reps == 0:
+                    return
+
+            ntri2 = round(dur/2 / dt)
+            tri = np.zeros((ntri2,))
+
+            tri[:ntri2] = np.linspace(0, 1, ntri2)
+            tri[ntri2:] = np.linspace(1, 0, ntri2)
+            tri *= amp
+
+            trivel = np.zeros_like(tri)
+            trivel[:ntri2] = amp/(dur/2)
+            trivel[ntri2:] = -amp/(dur/2)
+
+            pert = np.zeros_like(t)
+            pertvel = np.zeros_like(t)
+
+            pertt = []
+            for i in range(reps):
+                ttri1 = startcycle/basefreq + (dur + gap/basefreq)*i + dur/2
+                istri = np.logical_and(t >= ttri1 - dur/2, t < ttri1 + dur/2)
+
+                np.place(pert, istri, tri)
+                np.place(pertvel, istri, trivel)
+                pertt.append(ttri1)
+
+            self.pert = pert
+            self.pertvel = pertvel
+            self.pertt = pertt
+            self.pertamps = [amp]
+
 
     def make_motor_signal(self, t, pos, vel):
         assert False
