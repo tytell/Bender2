@@ -718,7 +718,9 @@ class BenderWindow(QtGui.QMainWindow):
                              'ra': stim['Rostral amplitude'],
                              'f0': stim['Start frequency'],
                              'f1': stim['End frequency'],
-                             'phoff': stim['Additional phase offset']})
+                             'phoff': stim['Additional phase offset'],
+                             'num': self.ui.nextFileNumberBox.value(),
+                             'f': stim['Start frequency']})
         else:
             assert False
 
