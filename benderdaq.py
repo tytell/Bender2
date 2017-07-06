@@ -399,7 +399,6 @@ class BenderDAQ(QtCore.QObject):
             self.pertt = pertt
             self.pertamps = [amp]
 
-
     def make_motor_signal(self, t, pos, vel):
         assert False
 

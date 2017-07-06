@@ -52,17 +52,26 @@ class BenderFile(object):
         gout.create_dataset('tnorm', data=bender.tnorm)
 
         try:
-            pertinfo = params.child('Stimulus', 'Perturbation')
+            pertparams = params.child('Stimulus', 'Perturbation', 'Parameters')
             dset = gout.create_dataset('Perturbation', data=bender.pert)
-            dset.attrs['Frequencies'] = bender.pertfreqs
-            dset.attrs['Amplitudes'] = bender.pertamps
-            dset.attrs['Phases'] = bender.pertphases
-            dset.attrs['MaxAmp'] = pertinfo['Max amplitude']
-            dset.attrs['MaxAmpUnits'] = pertinfo['Amplitude scale']
-            dset.attrs['AmplitudeFrequencyExponent'] = pertinfo['Amplitude frequency exponent']
-            dset.attrs['StartCycle'] = pertinfo['Start cycle']
-            dset.attrs['StopCycle'] = pertinfo['Stop cycle']
-            dset.attrs['RampCycles'] = pertinfo['Ramp duration']
+            if params['Stimulus', 'Perturbation', 'Type'] == 'Sines':
+                dset.attrs['Frequencies'] = bender.pertfreqs
+                dset.attrs['Amplitudes'] = bender.pertamps
+                dset.attrs['Phases'] = bender.pertphases
+
+                dset.attrs['MaxAmp'] = pertparams['Max amplitude']
+                dset.attrs['MaxAmpUnits'] = pertparams['Amplitude scale']
+                dset.attrs['AmplitudeFrequencyExponent'] = pertparams['Amplitude frequency exponent']
+                dset.attrs['StartCycle'] = pertparams['Start cycle']
+                dset.attrs['StopCycle'] = pertparams['Stop cycle']
+                dset.attrs['RampCycles'] = pertparams['Ramp duration']
+            elif params['Stimulus', 'Perturbation', 'Type'] == 'Trinangles':
+                dset.attrs['Duration'] = pertparams['Duration']
+                dset.attrs['Amplitude'] = pertparams['Amplitude']
+                dset.attrs['Phase'] = pertparams['Phase']
+                dset.attrs['Repetitions'] = pertparams['Repetitions']
+                dset.attrs['StartCycle'] = pertparams['Start cycle']
+                dset.attrs['DelayInBetween'] = pertparams['Delay in between']
         except Exception:
             pass
 

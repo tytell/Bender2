@@ -40,6 +40,8 @@ class BenderWindow_Ergometer(BenderWindow):
 
         super(BenderWindow_Ergometer, self).__init__()
 
+        self.perturbationState = dict()
+
         self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
         self.bender.sigDoneAcquiring.connect(self.endAcquisition)
 
@@ -65,6 +67,8 @@ class BenderWindow_Ergometer(BenderWindow):
 
         self.params.child('Motor parameters').sigTreeStateChanged.connect(self.generateStimulus)
 
+        self.params.child('Stimulus', 'Perturbations','Type').sigValueChanged.connect(self.changePerturbationType)
+
         try:
             self.params.child('Stimulus', 'Parameters', 'Activation', 'Type').sigValueChanged\
                 .connect(self.changeActivationType)
@@ -85,6 +89,8 @@ class BenderWindow_Ergometer(BenderWindow):
             self.params.child('DAQ', 'Input', 'Sampling frequency').sigValueChanged.disconnect(self.generateStimulus)
 
             self.params.child('Motor parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
+
+            self.params.child('Stimulus', 'Perturbations', 'Type').sigValueChanged.connect(self.changePerturbationType)
 
             try:
                 self.params.child('Stimulus', 'Parameters', 'Activation', 'Type').sigValueChanged \
@@ -120,6 +126,22 @@ class BenderWindow_Ergometer(BenderWindow):
         iter.next()
         for p in iter:
             p.setReadonly(isreadonly)
+
+    def changePerturbationType(self, param, value):
+        pertGroup = self.params.child('Stimulus', 'Perturbation', 'Parameters')
+        self.perturbationState[self.curPertType] = pertGroup.saveState()
+        try:
+            self.disconnectParameterSlots()
+
+            if value in self.perturbationState:
+                pertGroup.restoreState(self.perturbationState[value], blockSignals=True)
+            else:
+                pertGroup.clearChildren()
+                pertGroup.addChildren(self.stimParameterDefs[value])
+        finally:
+            self.connectParameterSlots()
+        self.curStimType = value
+        self.generateStimulus()
 
     def loadPerturbationFreqs(self):
         fn = QtGui.QFileDialog.getOpenFileName(self, 'Choose perturbation frequency file...')
