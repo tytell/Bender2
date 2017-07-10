@@ -13,7 +13,7 @@ import pyqtgraph as pg
 from benderdaq import BenderDAQ
 from benderfile import BenderFile
 from bender import BenderWindow
-from ergometer_params import parameterDefinitions, stimParameterDefs
+from ergometer_params import parameterDefinitions, stimParameterDefs, perturbationDefs
 
 try:
     import PyDAQmx as daq
@@ -36,11 +36,10 @@ class BenderWindow_Ergometer(BenderWindow):
     def __init__(self):
         self.bender = BenderDAQ_Ergometer()
         self.stimParameterDefs = stimParameterDefs
+        self.perturbationDefs = perturbationDefs
         self.benderFileClass = BenderFile_Ergometer
 
         super(BenderWindow_Ergometer, self).__init__()
-
-        self.perturbationState = dict()
 
         self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
         self.bender.sigDoneAcquiring.connect(self.endAcquisition)
@@ -58,16 +57,21 @@ class BenderWindow_Ergometer(BenderWindow):
         self.params = Parameter.create(name='params', type='group', children=parameterDefinitions)
         self.ui.parameterTreeWidget.setParameters(self.params, showTop=False)
 
+        self.curPertType = self.params['Stimulus', 'Perturbations', 'Type']
+        self.perturbationState = dict()
+
     def connectParameterSlots(self):
         self.params.child('Stimulus', 'Type').sigValueChanged.connect(self.changeStimType)
-        self.params.child('Stimulus').sigTreeStateChanged.connect(self.generateStimulus)
+        self.params.child('Stimulus', 'Perturbations', 'Type').sigValueChanged.connect(self.changePerturbationType)
+        self.params.child('Stimulus', 'Parameters').sigTreeStateChanged.connect(self.generateStimulus)
+        self.params.child('Stimulus', 'Perturbations', 'Parameters').sigTreeStateChanged.connect(self.generateStimulus)
+        self.params.child('Stimulus', 'Wait before').sigValueChanged.connect(self.generateStimulus)
+        self.params.child('Stimulus', 'Wait after').sigValueChanged.connect(self.generateStimulus)
         self.params.child('DAQ', 'Update rate').sigValueChanged.connect(self.generateStimulus)
         self.params.child('DAQ', 'Output', 'Sampling frequency').sigValueChanged.connect(self.generateStimulus)
         self.params.child('DAQ', 'Input', 'Sampling frequency').sigValueChanged.connect(self.generateStimulus)
 
         self.params.child('Motor parameters').sigTreeStateChanged.connect(self.generateStimulus)
-
-        self.params.child('Stimulus', 'Perturbations','Type').sigValueChanged.connect(self.changePerturbationType)
 
         try:
             self.params.child('Stimulus', 'Parameters', 'Activation', 'Type').sigValueChanged\
@@ -75,32 +79,42 @@ class BenderWindow_Ergometer(BenderWindow):
         except Exception as e:
             logging.debug('Trouble with activation type: {}'.format(e))
 
-        self.params.child('Stimulus', 'Perturbations', 'Load frequencies...').sigActivated\
-            .connect(self.loadPerturbationFreqs)
-        self.params.child('Stimulus', 'Perturbations', 'Randomize phases...').sigActivated\
-            .connect(self.randPerturbationPhases)
+        try:
+            self.params.child('Stimulus', 'Perturbations', 'Parameters', 'Load frequencies...').sigActivated\
+                .connect(self.loadPerturbationFreqs)
+            self.params.child('Stimulus', 'Perturbations', 'Parameters', 'Randomize phases...').sigActivated\
+                .connect(self.randPerturbationPhases)
+        except Exception:
+            pass
 
     def disconnectParameterSlots(self):
         try:
             self.params.child('Stimulus', 'Type').sigValueChanged.disconnect(self.changeStimType)
-            self.params.child('Stimulus').sigTreeStateChanged.disconnect(self.generateStimulus)
+            self.params.child('Stimulus', 'Perturbations', 'Type').sigValueChanged.disconnect(self.changePerturbationType)
+            self.params.child('Stimulus', 'Parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
+            self.params.child('Stimulus', 'Perturbations', 'Parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
+            self.params.child('Stimulus', 'Wait before').sigValueChanged.disconnect(self.generateStimulus)
+            self.params.child('Stimulus', 'Wait after').sigValueChanged.disconnect(self.generateStimulus)
             self.params.child('DAQ', 'Update rate').sigValueChanged.disconnect(self.generateStimulus)
             self.params.child('DAQ', 'Output', 'Sampling frequency').sigValueChanged.disconnect(self.generateStimulus)
             self.params.child('DAQ', 'Input', 'Sampling frequency').sigValueChanged.disconnect(self.generateStimulus)
 
             self.params.child('Motor parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
 
-            self.params.child('Stimulus', 'Perturbations', 'Type').sigValueChanged.connect(self.changePerturbationType)
-
             try:
                 self.params.child('Stimulus', 'Parameters', 'Activation', 'Type').sigValueChanged \
                     .disconnect(self.changeActivationType)
             except Exception:
                 pass
-            self.params.child('Stimulus', 'Perturbations', 'Load frequencies...').sigActivated.disconnect(
-                self.loadPerturbationFreqs)
-            self.params.child('Stimulus', 'Perturbations', 'Randomize phases...').sigActivated.disconnect(
-                self.randPerturbationPhases)
+
+            try:
+                self.params.child('Stimulus', 'Perturbations', 'Load frequencies...').sigActivated.disconnect(
+                    self.loadPerturbationFreqs)
+                self.params.child('Stimulus', 'Perturbations', 'Randomize phases...').sigActivated.disconnect(
+                    self.randPerturbationPhases)
+            except Exception:
+                pass
+
         except TypeError:
             logging.warning('Problem disconnecting parameter slots')
             pass
@@ -128,7 +142,7 @@ class BenderWindow_Ergometer(BenderWindow):
             p.setReadonly(isreadonly)
 
     def changePerturbationType(self, param, value):
-        pertGroup = self.params.child('Stimulus', 'Perturbation', 'Parameters')
+        pertGroup = self.params.child('Stimulus', 'Perturbations', 'Parameters')
         self.perturbationState[self.curPertType] = pertGroup.saveState()
         try:
             self.disconnectParameterSlots()
@@ -137,15 +151,15 @@ class BenderWindow_Ergometer(BenderWindow):
                 pertGroup.restoreState(self.perturbationState[value], blockSignals=True)
             else:
                 pertGroup.clearChildren()
-                pertGroup.addChildren(self.stimParameterDefs[value])
+                pertGroup.addChildren(perturbationDefs[value])
         finally:
             self.connectParameterSlots()
-        self.curStimType = value
+        self.curPertType = value
         self.generateStimulus()
 
     def loadPerturbationFreqs(self):
         fn = QtGui.QFileDialog.getOpenFileName(self, 'Choose perturbation frequency file...')
-        if fn is None:
+        if len(fn) is 0:
             return
 
         freqs = []

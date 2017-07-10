@@ -77,6 +77,33 @@ pwmParams = [
     {'name': 'Base frequency', 'type': 'float', 'value': 500, 'suffix': 'Hz'}
 ]
 
+perturbationDefs = {
+    'None': [],
+    'Sines': [
+        {'name': 'Start cycle', 'type': 'float', 'value': 4.0, 'step': 0.5},
+        {'name': 'Stop cycle', 'type': 'float', 'value': 0.0, 'step': 0.5,
+         'tip': 'Stop perturbations at cycle number. Negative numbers are cycles relative to the last one'},
+        {'name': 'Ramp cycles', 'type': 'float', 'value': 0.5, 'step': 0.1,
+         'tip': 'Ramp perturbations in over this period of time'},
+            {'name': 'Max amplitude', 'type': 'float', 'value': 5.0, 'suffix': '%'},
+        {'name': 'Amplitude scale', 'type': 'list', 'values': ['mm', '% fundamental'], 'value': '% fundamental'},
+            {'name': 'Amplitude frequency exponent', 'type': 'float', 'value': 0.25, 'step': 0.25,
+         'tip': 'Divide amplitudes by frequency to this exponent. 0 = no frequency scaling'},
+            {'name': 'Frequencies', 'type': 'str', 'value': ''},
+        {'name': 'Load frequencies...', 'type': 'action'},
+            {'name': 'Phases', 'type': 'str', 'value': ''},
+        {'name': 'Randomize phases...', 'type': 'action'},
+    ],
+    'Triangles': [
+        {'name': 'Duration', 'type': 'float', 'value': 0.05, 'step': 10.0, 'suffix': 'sec', 'siPrefix': True},
+        {'name': 'Amplitude', 'type': 'float', 'value': 0.2, 'step':0.05, 'suffix': 'mm'},
+        {'name': 'Phase', 'type': 'float', 'value': 0.0, 'step': 0.05},
+        {'name': 'Repetitions', 'type': 'int', 'value': 2},
+        {'name': 'Start cycle', 'type': 'float', 'value': 1.0, 'step': 0.25, 'suffix': 'cycles'},
+        {'name': 'Delay in between', 'type': 'float', 'value': 1.0, 'step': 0.25, 'suffix': 'cycles'},
+    ]
+}
+
 parameterDefinitions = [
     {'name': 'DAQ', 'type': 'group', 'children': [
         {'name': 'Input', 'type': 'group', 'children': [
@@ -121,7 +148,8 @@ parameterDefinitions = [
         {'name': 'Type', 'type': 'list', 'values': ['None', 'Sine', 'Frequency Sweep', 'Ramp'], 'value': 'Sine'},
         {'name': 'Parameters', 'type': 'group', 'children': stimParameterDefs['Sine']},
         {'name': 'Perturbations', 'type': 'group', 'children': [
-            {'name': 'On', 'type': 'bool', 'value': False},
+            {'name': 'Type', 'type': 'list', 'values': ['None', 'Sines', 'Triangles'], 'value': 'None'},
+            {'name': 'Parameters', 'type': 'group', 'children': perturbationDefs['None']},
         ]},
         {'name': 'Wait before', 'type': 'float', 'value': 1.0, 'suffix': 's'},
         {'name': 'Wait after', 'type': 'float', 'value': 1.0, 'suffix': 's'},

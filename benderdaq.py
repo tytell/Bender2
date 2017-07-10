@@ -288,22 +288,29 @@ class BenderDAQ(QtCore.QObject):
         self.pertvel = np.zeros_like(t)
 
         try:
-            pertinfo = self.params.child('Stimulus', 'Perturbations')
+            pertinfo = self.params.child('Stimulus', 'Perturbations', 'Parameters')
             basefreq = self.params['Stimulus', 'Parameters', 'Frequency']
             ncycles = self.params['Stimulus', 'Parameters', 'Cycles']
         except Exception:
             return
 
-        if pertinfo['Type'] == 'None':
+        if self.params['Stimulus', 'Perturbations', 'Type'] == 'None':
             return
-        elif pertinfo['Type'] == 'Sines':
-            freqstr = pertinfo['Frequencies']
-            phasestr = pertinfo['Phases']
+        elif self.params['Stimulus', 'Perturbations', 'Type'] == 'Sines':
+            try:
+                freqstr = pertinfo['Frequencies']
+                phasestr = pertinfo['Phases']
+            except Exception:
+                return
+
             try:
                 freqs = np.array([float(f) for f in freqstr.split()])
                 phases = np.array([float(p) for p in phasestr.split()])
             except ValueError:
                 logging.warning('Could not parse perturbation frequency string')
+                return
+
+            if len(freqs) == 0:
                 return
 
             if len(phases) < len(freqs):
@@ -356,7 +363,7 @@ class BenderDAQ(QtCore.QObject):
             self.pertamps = amps
             self.pertphases = phases
 
-        elif pertinfo['Type'] == 'Triangles':
+        elif self.params['Stimulus', 'Perturbations', 'Type'] == 'Triangles':
             startcycle = pertinfo['Start cycle']
             amp = pertinfo['Amplitude']
             dur = pertinfo['Duration']
@@ -372,7 +379,7 @@ class BenderDAQ(QtCore.QObject):
                     return
 
             ntri2 = round(dur/2 / dt)
-            tri = np.zeros((ntri2,))
+            tri = np.zeros((2*ntri2,))
 
             tri[:ntri2] = np.linspace(0, 1, ntri2)
             tri[ntri2:] = np.linspace(1, 0, ntri2)

@@ -60,6 +60,9 @@ class BenderWindow(QtGui.QMainWindow):
 
         stimtype = self.params.child('Stimulus', 'Type')
         self.curStimType = stimtype.value()
+
+        self.curPertType = self.params['Stimulus', 'Perturbations', 'Type']
+
         self.connectParameterSlots()
 
         self.stimParamState = dict()
@@ -596,6 +599,16 @@ class BenderWindow(QtGui.QMainWindow):
                 else:
                     assert False
                 self.curStimType = stimtype
+
+            if settings.contains("Stimulus/Perturbations/Type"):
+                perttype = str(settings.value("Stimulus/Perturbations/Type").toString())
+                if perttype in self.perturbationDefs:
+                    pertParamGroup = self.params.child('Stimulus', 'Perturbations', 'Parameters')
+                    pertParamGroup.clearChildren()
+                    pertParamGroup.addChildren(self.perturbationDefs[perttype])
+                else:
+                    assert False
+                self.curPertType = perttype
 
             self.readParameters(settings, self.params)
         finally:

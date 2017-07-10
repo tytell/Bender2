@@ -20,7 +20,8 @@ from bender_ui import Ui_BenderWindow
 from benderdaq import BenderDAQ
 from benderfile import BenderFile
 from bender import BenderWindow
-from wholebody_params import parameterDefinitions, stimParameterDefs, stepperParams, velocityDriverParams, encoderParams, pwmParams
+from wholebody_params import parameterDefinitions, stimParameterDefs, stepperParams, velocityDriverParams, \
+    encoderParams, pwmParams, perturbationDefs
 
 try:
     import PyDAQmx as daq
@@ -49,6 +50,7 @@ class BenderWindow_WholeBody(BenderWindow):
         self.bender = BenderDAQ_WholeBody()
         self.benderFileClass = BenderFile_WholeBody
         self.stimParameterDefs = stimParameterDefs
+        self.perturbationDefs = perturbationDefs
 
         super(BenderWindow_WholeBody, self).__init__()
 
