@@ -173,15 +173,15 @@ class BenderWindow_Ergometer(BenderWindow):
                     pass                    # ignore lines that don't convert to floats
 
         freqstr = ' '.join(freqs)
-        self.params['Stimulus', 'Perturbations', 'Frequencies'] = freqstr
+        self.params['Stimulus', 'Perturbations', 'Parameters', 'Frequencies'] = freqstr
         self.randPerturbationPhases()
 
     def randPerturbationPhases(self):
-        freqs = self.params['Stimulus', 'Perturbations', 'Frequencies'].split()
+        freqs = self.params['Stimulus', 'Perturbations', 'Parameters', 'Frequencies'].split()
 
         phases = np.random.rand(len(freqs))
         phasestr = ' '.join(['{:.3f}'.format(p) for p in phases])
-        self.params['Stimulus', 'Perturbations', 'Phases'] = phasestr
+        self.params['Stimulus', 'Perturbations', 'Parameters', 'Phases'] = phasestr
 
     def loadCalibration(self):
         pass

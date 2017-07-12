@@ -372,7 +372,7 @@ class BenderDAQ(QtCore.QObject):
 
             totaltridur = startcycle/basefreq + (dur + gap/basefreq)*reps
             if totaltridur > ncycles/basefreq:
-                reps = np.floor((ncycles/basefreq - startcycle/basefreq) / (dur + gap/basefreq))
+                reps = int(np.floor((ncycles/basefreq - startcycle/basefreq) / (dur + gap/basefreq)))
                 logging.warning('Only time to do {} triangles'.format(reps))
 
                 if reps == 0:
