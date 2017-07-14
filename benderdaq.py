@@ -368,6 +368,7 @@ class BenderDAQ(QtCore.QObject):
             amp = pertinfo['Amplitude']
             dur = pertinfo['Duration']
             reps = pertinfo['Repetitions']
+            phase = pertinfo['Phase']
             gap = pertinfo['Delay in between']
 
             totaltridur = startcycle/basefreq + (dur + gap/basefreq)*reps
@@ -394,7 +395,7 @@ class BenderDAQ(QtCore.QObject):
 
             pertt = []
             for i in range(reps):
-                ttri1 = startcycle/basefreq + (dur + gap/basefreq)*i + dur/2
+                ttri1 = startcycle/basefreq + phase/basefreq + gap/basefreq*i
                 istri = np.logical_and(t >= ttri1 - dur/2, t < ttri1 + dur/2)
 
                 np.place(pert, istri, tri)
