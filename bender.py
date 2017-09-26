@@ -24,88 +24,12 @@ from benderfile import BenderFile
 
 from settings import SETTINGS_FILE, MOTOR_TYPE, TIME_DEBUG
 
+from double_params import parameterDefinitions, stimParameterDefs, perturbationDefs, ChannelGroup
+
 pg.setConfigOption('background', 'w')
 pg.setConfigOption('foreground', 'k')
 
 # python C:\Anaconda2\Lib\site-packages\PyQt4\uic\pyuic.py bender.ui -o bender_ui.py
-
-class ChannelGroup(pTypes.GroupParameter):
-    def __init__(self, **opts):
-        opts['type'] = 'group'
-        opts['addText'] = "Add channel"
-        pTypes.GroupParameter.__init__(self, **opts)
-
-    def addNew(self):
-        newname = "Channel {}".format(len(self.childs)+1)
-        hwchan = "ai{}".format(len(self.childs))
-
-        self.addChild(
-            dict(name=hwchan, type='str', value=newname, removable=True, renamable=True))
-
-stimParameterDefs = {
-    'Sine': [
-        {'name': 'Caudal amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'deg'},
-        {'name': 'Rostral amplitude', 'type': 'float', 'value': 15.0, 'step':1.0, 'suffix': 'deg'},
-        {'name': 'Distance between', 'type': 'int', 'value': 20, 'step': 1, 'suffix': 'seg'},
-        {'name': 'Base phase offset', 'type': 'float', 'value': 0.0, 'readonly': True},
-        {'name': 'Additional phase offset', 'type': 'float', 'value': 0.0},
-        {'name': 'Frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
-        {'name': 'Cycles', 'type': 'int', 'value': 10},
-    ],
-    'Frequency Sweep': [
-        {'name': 'Start frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
-        {'name': 'End frequency', 'type': 'float', 'value': 1.0, 'step': 0.1, 'suffix': 'Hz'},
-        {'name': 'Frequency change', 'type': 'list', 'values': ['Exponential','Linear'], 'value': 'Exponential'},
-        {'name': 'Frequency exponent', 'type': 'float', 'value': 0.0, 'limits': (-1, 0)},
-        {'name': 'Duration', 'type': 'float', 'value': 300.0, 'suffix': 'sec'},
-        {'name': 'Caudal amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'deg'},
-        {'name': 'Rostral amplitude', 'type': 'float', 'value': 15.0, 'step':1.0, 'suffix': 'deg'},
-        {'name': 'Distance between', 'type': 'int', 'value': 20, 'step': 1, 'suffix': 'seg'},
-        {'name': 'Base phase offset', 'type': 'float', 'value': 0.0, 'readonly': True},
-        {'name': 'Additional phase offset', 'type': 'float', 'value': 0.0},
-    ]
-}
-
-velocityDriverParams = [
-    {'name': 'Maximum speed', 'type': 'float', 'value': 400.0, 'step': 50.0, 'suffix': 'RPM'},
-    {'name': 'Minimum pulse frequency', 'type': 'float', 'value': 1000.0, 'step': 100.0, 'siPrefix': True,
-     'suffix': 'Hz'},
-    {'name': 'Maximum pulse frequency', 'type': 'float', 'value': 5000.0, 'step': 100.0, 'siPrefix': True,
-     'suffix': 'Hz'},
-]
-
-stepperParams = [
-    {'name': 'Steps per revolution', 'type': 'float', 'value': 6400}
-]
-
-parameterDefinitions = [
-    {'name': 'DAQ', 'type': 'group', 'children': [
-        {'name': 'Device name', 'type': 'str', 'value': 'Dev1'},
-        {'name': 'Input', 'type': 'group', 'children': [
-            {'name': 'Sampling frequency', 'type': 'float', 'value': 1000.0, 'step': 500.0, 'siPrefix': True,
-             'suffix': 'Hz'},
-            ChannelGroup(name="Channels", children=[]),
-            {'name': 'Encoder 1', 'type': 'str', 'value': 'ctr0'},
-            {'name': 'Encoder 2', 'type': 'str', 'value': 'ctr2'},
-            {'name': 'Counts per revolution', 'type': 'int', 'value': 10000, 'limits': (1, 100000)}
-        ]},
-        {'name': 'Output', 'type': 'group', 'children': [
-            {'name': 'Sampling frequency', 'type': 'float', 'value': 10000.0, 'step': 1000.0, 'siPrefix': True,
-             'suffix': 'Hz', 'readonly': True},
-            {'name': 'Digital port', 'type': 'str', 'value': 'port0'}
-        ]},
-        {'name': 'Update rate', 'type': 'float', 'value': 10.0, 'suffix': 'Hz'}
-    ]},
-    {'name': 'Motor parameters', 'type': 'group', 'children':
-        stepperParams if MOTOR_TYPE == 'stepper' else velocityDriverParams},
-    {'name': 'Stimulus', 'type': 'group', 'children': [
-        {'name': 'Type', 'type': 'list', 'values': ['Sine', 'Frequency Sweep'], 'value': 'Sine'},
-        {'name': 'Parameters', 'type': 'group', 'children': stimParameterDefs['Sine']},
-        {'name': 'Ramp duration', 'type': 'float', 'value': 0.5, 'suffix': 's'},
-        {'name': 'Wait before', 'type': 'float', 'value': 1.0, 'suffix': 's'},
-        {'name': 'Wait after', 'type': 'float', 'value': 1.0, 'suffix': 's'},
-    ]}
-]
 
 
 class RasterGroup(pg.VTickGroup):
@@ -142,6 +66,8 @@ class BenderWindow(QtGui.QMainWindow):
         stimtype = self.params.child('Stimulus', 'Type')
         self.curStimType = stimtype.value()
         self.connectParameterSlots()
+
+        self.curPertType = self.params['Stimulus', 'Perturbations', 'Type']
 
         self.stimParamState = dict()
 
@@ -194,14 +120,16 @@ class BenderWindow(QtGui.QMainWindow):
 
     def connectParameterSlots(self):
         self.params.child('Stimulus', 'Type').sigValueChanged.connect(self.changeStimType)
-        self.params.child('Stimulus').sigTreeStateChanged.connect(self.generateStimulus)
+        self.params.child('Stimulus', 'Perturbations', 'Type').sigValueChanged.connect(self.changePerturbationType)
         try:
-            self.params.child('Stimulus', 'Parameters', 'Distance between').sigValueChanged.connect(self.updatePhaseOffset)
-        except Exception as exc:
-            if 'has no child named' in str(exc):
-                pass
-            else:
-                raise
+            self.params.child('Stimulus', 'Parameters', 'Type').sigValueChanged.connect(self.changeSineType)
+        except Exception:
+            pass
+
+        self.params.child('Stimulus', 'Parameters').sigTreeStateChanged.connect(self.generateStimulus)
+        self.params.child('Stimulus', 'Perturbations', 'Parameters').sigTreeStateChanged.connect(self.generateStimulus)
+        self.params.child('Stimulus', 'Wait before').sigValueChanged.connect(self.generateStimulus)
+        self.params.child('Stimulus', 'Wait after').sigValueChanged.connect(self.generateStimulus)
 
         self.params.child('DAQ', 'Update rate').sigValueChanged.connect(self.generateStimulus)
         if MOTOR_TYPE == 'velocity':
@@ -212,18 +140,32 @@ class BenderWindow(QtGui.QMainWindow):
         self.params.child('Motor parameters').sigTreeStateChanged.connect(self.generateStimulus)
         self.params.child('DAQ', 'Input', 'Channels').sigTreeStateChanged.connect(self.channelsChanged)
 
+        try:
+            self.params.child('Stimulus', 'Perturbations', 'Parameters', 'Load frequencies...').sigActivated\
+                .connect(self.loadPerturbationFreqs)
+            self.params.child('Stimulus', 'Perturbations', 'Parameters', 'Randomize phases...').sigActivated\
+                .connect(self.randPerturbationPhases)
+        except Exception:
+            pass
+
     def disconnectParameterSlots(self):
         try:
             self.params.child('Stimulus', 'Type').sigValueChanged.disconnect(self.changeStimType)
-            self.params.child('Stimulus').sigTreeStateChanged.disconnect(self.generateStimulus)
+            self.params.child('Stimulus', 'Perturbations', 'Type').sigValueChanged.disconnect(self.changePerturbationType)
             try:
-                self.params.child('Stimulus', 'Parameters', 'Distance between').\
-                    sigValueChanged.disconnect(self.updatePhaseOffset)
-            except Exception as exc:
-                if 'has no child named' in str(exc):
-                    pass
-                else:
-                    raise
+                self.params.child('Stimulus', 'Parameters', 'Type').sigValueChanged.disconnect(self.changeSineType)
+            except Exception:
+                pass
+            self.params.child('Stimulus', 'Parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
+
+            try:
+                self.params.child('Stimulus', 'Perturbations', 'Parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
+            except Exception:
+                pass
+
+            self.params.child('Stimulus', 'Wait before').sigValueChanged.disconnect(self.generateStimulus)
+            self.params.child('Stimulus', 'Wait after').sigValueChanged.disconnect(self.generateStimulus)
+
 
             self.params.child('DAQ', 'Update rate').sigValueChanged.disconnect(self.generateStimulus)
             if MOTOR_TYPE == 'velocity':
@@ -234,19 +176,18 @@ class BenderWindow(QtGui.QMainWindow):
 
             self.params.child('Motor parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
             self.params.child('DAQ', 'Input', 'Channels').sigTreeStateChanged.disconnect(self.channelsChanged)
+
+            try:
+                self.params.child('Stimulus', 'Perturbations', 'Load frequencies...').sigActivated.disconnect(
+                    self.loadPerturbationFreqs)
+                self.params.child('Stimulus', 'Perturbations', 'Randomize phases...').sigActivated.disconnect(
+                    self.randPerturbationPhases)
+            except Exception:
+                pass
+
         except TypeError:
             logging.warning('Problem disconnecting parameter slots')
             pass
-
-    def updatePhaseOffset(self):
-        try:
-            dist = self.params['Stimulus', 'Parameters', 'Distance between']
-            self.params['Stimulus', 'Parameters', 'Base phase offset'] = dist * 0.01
-        except Exception as exc:
-            if 'has no child named' in str(exc):
-                pass
-            else:
-                raise
 
     def make_spike_plots(self, start=0):
         assert(len(self.spikeplots) == start)
@@ -338,7 +279,11 @@ class BenderWindow(QtGui.QMainWindow):
 
         if newnchannels > self.nchannels:
             curchannels = self.nchannels
-            addthresh = np.mean(self.spikeThreshold, axis=0)
+            if self.spikeThreshold is None:
+                addthresh = 0.1
+            else:
+                addthresh = np.mean(self.spikeThreshold, axis=0)
+
             addthresh = np.tile(addthresh, (newnchannels-curchannels, 1))
 
             self.spikeThreshold = np.vstack((self.spikeThreshold, addthresh))
@@ -530,8 +475,8 @@ class BenderWindow(QtGui.QMainWindow):
                 xs = self.bender.f
                 showraw = False
 
-        self.stim_plot[0].setData(x=xs, y=self.bender.pos1)
-        self.stim_plot[1].setData(x=xs, y=self.bender.pos2)
+        self.stim_plot[0].setData(x=xs, y=self.bender.pos[0])
+        self.stim_plot[1].setData(x=xs, y=self.bender.pos[1])
 
         self.encoderPlot1.setData(x=x, y=encdata[:, 0])
         self.encoderPlot2.setData(x=x, y=encdata[:, 1])
@@ -565,6 +510,12 @@ class BenderWindow(QtGui.QMainWindow):
         filename = self.getFileName(pattern)
         self.ui.fileNameLabel.setText(filename)
         self.curFileName = filename
+
+        try:
+            self.ui.plot1Widget.removeItem(self.encoderPlot1)
+            self.ui.plot1Widget.removeItem(self.encoderPlot2)
+        except AttributeError as e:
+            pass
 
         self.encoderPlot1 = self.ui.plot1Widget.plot(pen='k', name='Encoder 1')
         self.encoderPlot2 = self.ui.plot1Widget.plot(pen='g', name='Encoder 2')
@@ -657,8 +608,87 @@ class BenderWindow(QtGui.QMainWindow):
         finally:
             self.connectParameterSlots()
         self.curStimType = value
-        self.updatePhaseOffset()
         self.generateStimulus()
+
+    def changeSineType(self, param, value):
+        stim = self.params.child('Stimulus', 'Parameters')
+
+        self.disconnectParameterSlots()
+        try:
+            if value in ['Rostral only', 'Caudal only', 'Same amplitude', 'Same frequency']:
+                try:
+                    stim.child('Rostral frequency').setName('Frequency')
+                except Exception:
+                    pass
+                stim.child('Caudal frequency').setReadonly(True)
+                stim.child('Phase offset').setReadonly(False)
+            elif value == 'Different frequency':
+                try:
+                    stim.child('Frequency').setName('Rostral frequency')
+                except Exception:
+                    pass
+                stim.child('Caudal frequency').setReadonly(False)
+                stim.child('Phase offset').setReadonly(True)
+
+            if value == 'Rostral only':
+                stim.child('Rostral amplitude').setReadonly(False)
+                stim.child('Caudal amplitude').setReadonly(True)
+            elif value == 'Caudal only':
+                stim.child('Rostral amplitude').setReadonly(True)
+                stim.child('Caudal amplitude').setReadonly(False)
+            else:
+                stim.child('Rostral amplitude').setReadonly(False)
+                stim.child('Caudal amplitude').setReadonly(False)
+
+            if value == 'Same amplitude':
+                amp = max((stim['Rostral amplitude'], stim['Caudal amplitude']))
+                stim['Rostral amplitude'] = amp
+                stim['Caudal amplitude'] = amp
+        finally:
+            self.connectParameterSlots()
+            self.generateStimulus()
+
+    def changePerturbationType(self, param, value):
+        pertGroup = self.params.child('Stimulus', 'Perturbations', 'Parameters')
+        self.perturbationState[self.curPertType] = pertGroup.saveState()
+        try:
+            self.disconnectParameterSlots()
+
+            if value in self.perturbationState:
+                pertGroup.restoreState(self.perturbationState[value], blockSignals=True)
+            else:
+                pertGroup.clearChildren()
+                pertGroup.addChildren(perturbationDefs[value])
+        finally:
+            self.connectParameterSlots()
+        self.curPertType = value
+        self.generateStimulus()
+
+    def loadPerturbationFreqs(self):
+        fn = QtGui.QFileDialog.getOpenFileName(self, 'Choose perturbation frequency file...')
+        if len(fn) is 0:
+            return
+
+        freqs = []
+        with open(fn, "r") as f:
+            for ln in f:
+                try:
+                    ln = ln.strip()
+                    val = float(ln)         # check that it converts properly to a float
+                    freqs.append(ln)
+                except ValueError:
+                    pass                    # ignore lines that don't convert to floats
+
+        freqstr = ' '.join(freqs)
+        self.params['Stimulus', 'Perturbations', 'Parameters', 'Frequencies'] = freqstr
+        self.randPerturbationPhases()
+
+    def randPerturbationPhases(self):
+        freqs = self.params['Stimulus', 'Perturbations', 'Parameters', 'Frequencies'].split()
+
+        phases = np.random.rand(len(freqs))
+        phasestr = ' '.join(['{:.3f}'.format(p) for p in phases])
+        self.params['Stimulus', 'Perturbations', 'Parameters', 'Phases'] = phasestr
 
     def generateStimulus(self, showwarning=True):
         try:
@@ -671,8 +701,9 @@ class BenderWindow(QtGui.QMainWindow):
             return
 
         if self.bender.t is not None:
-            self.stim_plot = [self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos1, clear=True),
-                self.ui.plot1Widget.plot(x=self.bender.t, y=self.bender.pos2, pen='r')]
+            self.ui.plot1Widget.clear()
+            self.stim_plot = [self.ui.plot1Widget.plot(x=self.bender.t, y=p1, pen=col1)
+                              for p1, col1 in zip(self.bender.pos, ['b','r'])]
             self.t = self.bender.t
             self.tnorm = self.bender.tnorm
             self.freq = None
@@ -703,12 +734,35 @@ class BenderWindow(QtGui.QMainWindow):
         logging.debug('Stimulus/Type = {}'.format(self.params['Stimulus', 'Type']))
         stimtype = str(self.params['Stimulus', 'Type'])
         if stimtype == 'Sine':
+            if stim['Type'] == 'Rostral only':
+                rostamp = stim['Rostral amplitude']
+                caudamp = 0.0
+            elif stim['Type'] == 'Caudal only':
+                rostamp = 0.0
+                caudamp = stim['Caudal amplitude']
+            else:
+                rostamp = stim['Rostral amplitude']
+                caudamp = stim['Caudal amplitude']
+
+            if stim['Type'] == 'Different frequency':
+                rostfreq = stim['Rostral frequency']
+                caudfreq = stim['Caudal frequency']
+                freq = min((rostfreq, caudfreq))
+                phaseoff = 0.0
+            else:
+                rostfreq = stim['Frequency']
+                caudfreq = stim['Frequency']
+                freq = rostfreq
+                phaseoff = stim['Phase offset']
+
             data = SafeDict({'tp': 'sin',
-                             'f': stim['Frequency'],
-                             'a': stim['Caudal amplitude'],
-                             'ca': stim['Caudal amplitude'],
-                             'ra': stim['Rostral amplitude'],
-                             'phoff': stim['Additional phase offset'],
+                             'f': freq,
+                             'rf': rostfreq,
+                             'cf': caudfreq,
+                             'a': caudamp,
+                             'ca': caudamp,
+                             'ra': rostamp,
+                             'phoff': phaseoff,
                              'num': self.ui.nextFileNumberBox.value()})
 
         elif stimtype == 'Frequency Sweep':
@@ -718,9 +772,14 @@ class BenderWindow(QtGui.QMainWindow):
                              'ra': stim['Rostral amplitude'],
                              'f0': stim['Start frequency'],
                              'f1': stim['End frequency'],
-                             'phoff': stim['Additional phase offset'],
+                             'phoff': stim['Phase offset'],
                              'num': self.ui.nextFileNumberBox.value(),
                              'f': stim['Start frequency']})
+
+        elif stimtype == 'None':
+            data = SafeDict({'tp': 'none',
+                             'num': self.ui.nextFileNumberBox.value()})
+
         else:
             assert False
 
@@ -809,7 +868,6 @@ class BenderWindow(QtGui.QMainWindow):
 
         try:
             self.updateOutputFrequency()
-            self.updatePhaseOffset()
             self.generateStimulus(showwarning=False)
             self.initializeChannels()
             self.updateFileName()

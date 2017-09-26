@@ -39,21 +39,26 @@ class BenderFile(object):
 
         # save the parameters for generating the stimulus
         gout = self.h5file.create_group('NominalStimulus')
-        gout.create_dataset('RostralPosition', data=bender.pos1)
-        gout.create_dataset('RostralVelocity', data=bender.vel1)
-        gout.create_dataset('CaudalPosition', data=bender.pos2)
-        gout.create_dataset('CaudalVelocity', data=bender.vel2)
+        gout.create_dataset('RostralPosition', data=bender.pos[0])
+        gout.create_dataset('RostralVelocity', data=bender.vel[0])
+        gout.create_dataset('CaudalPosition', data=bender.pos[1])
+        gout.create_dataset('CaudalVelocity', data=bender.vel[1])
         gout.create_dataset('Phase', data=bender.phase)
         gout.create_dataset('t', data=bender.t)
         gout.create_dataset('tnorm', data=bender.tnorm)
 
         stim = params.child('Stimulus', 'Parameters')
         if params['Stimulus', 'Type'] == 'Sine':
+            gout.attrs['SineType'] = stim['Type']
             gout.attrs['RostralAmplitude'] = stim['Rostral amplitude']
             gout.attrs['CaudalAmplitude'] = stim['Caudal amplitude']
-            gout.attrs['Frequency'] = stim['Frequency']
-            gout.attrs['BasePhaseOffset'] = stim['Base phase offset']
-            gout.attrs['AddPhaseOffset'] = stim['Additional phase offset']
+            try:
+                gout.attrs['Frequency'] = stim['Frequency']
+            except Exception:
+                gout.attrs['RostralFrequency'] = stim['Rostral frequency']
+                gout.attrs['CaudalFrequency'] = stim['Caudal frequency']
+
+            gout.attrs['PhaseOffset'] = stim['Phase offset']
             gout.attrs['Cycles'] = stim['Cycles']
             gout.attrs['WaitPre'] = params['Stimulus', 'Wait before']
             gout.attrs['WaitPost'] = params['Stimulus', 'Wait after']

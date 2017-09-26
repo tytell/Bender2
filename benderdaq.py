@@ -36,8 +36,11 @@ class BenderDAQ(QtCore.QObject):
         self.params = None
 
         self.t = None
-        self.pos = None
-        self.vel = None
+        self.pos = [None, None]
+        self.vel = [None, None]
+        self.pert = [None, None]
+        self.pertvel = [None, None]
+
         self.duration = None
         self.digital_out = None
 
@@ -56,6 +59,8 @@ class BenderDAQ(QtCore.QObject):
             self.make_sine_stimulus()
         elif self.params['Stimulus', 'Type'] == 'Frequency Sweep':
             self.make_freqsweep_stimulus()
+        elif self.params['Stimulus', 'Type'] == 'None':
+            self.make_none_stimulus()
         else:
             assert False
 
@@ -63,8 +68,8 @@ class BenderDAQ(QtCore.QObject):
         try:
             _ = self.params['Stimulus', 'Parameters', 'Cycles']
         except Exception:
-            self.pos = None
-            self.vel = None
+            self.pos = [None, None]
+            self.vel = [None, None]
             self.t = None
             return
 
@@ -74,77 +79,137 @@ class BenderDAQ(QtCore.QObject):
 
         logging.debug('Stimulus.wait before = {}'.format(self.params['Stimulus', 'Wait before']))
         stim = self.params.child('Stimulus', 'Parameters')
-        dur = before + stim['Cycles'] / stim['Frequency'] + after
 
-        self.nupdates = int(np.ceil(dur * self.params['DAQ', 'Update rate']))
-        dur = float(self.nupdates) / self.params['DAQ', 'Update rate']
+        if stim['Type'] == 'Rostral only':
+            rostamp = stim['Rostral amplitude']
+            caudamp = 0.0
+        elif stim['Type'] == 'Caudal only':
+            rostamp = 0.0
+            caudamp = stim['Caudal amplitude']
+        else:
+            rostamp = stim['Rostral amplitude']
+            caudamp = stim['Caudal amplitude']
 
-        self.duration = dur
+        if stim['Type'] == 'Different frequency':
+            try:
+                rostfreq = stim['Rostral frequency']
+            except Exception:
+                self.pos = [None, None]
+                self.vel = [None, None]
+                self.t = None
+                return
+
+            caudfreq = stim['Caudal frequency']
+            if rostfreq < caudfreq:
+                minfreq = rostfreq
+            else:
+                minfreq = caudfreq
+            phaseoff = 0.0
+        else:
+            rostfreq = stim['Frequency']
+            caudfreq = stim['Frequency']
+            minfreq = rostfreq
+            phaseoff = stim['Phase offset']
+
+        stimdur = stim['Cycles'] / minfreq
+        totaldur = before + stimdur + after
+
+        self.nupdates = int(np.ceil(totaldur * self.params['DAQ', 'Update rate']))
+        totaldur = float(self.nupdates) / self.params['DAQ', 'Update rate']
+
+        self.duration = totaldur
 
         dt = 1 / self.params['DAQ', 'Input', 'Sampling frequency']
-        t = np.arange(0.0, dur, dt) - before
+        t = np.arange(0.0, totaldur, dt) - before
 
         # generate rostral stimulus
-        pos1 = stim['Rostral amplitude'] * np.sin(2 * np.pi * stim['Frequency'] * t)
-        pos1[t < 0] = 0
-        pos1[t > stim['Cycles'] / stim['Frequency']] = 0
+        if rostamp != 0:
+            pos1 = rostamp * np.sin(2 * np.pi * rostfreq * t)
+            p1end = rostamp * np.sin(2 * np.pi * rostfreq * stimdur)
 
-        vel1 = 2.0 * np.pi * stim['Frequency'] * stim['Rostral amplitude'] * \
-              np.cos(2 * np.pi * stim['Frequency'] * t)
-        vel1[t < 0] = 0
-        vel1[t > stim['Cycles'] / stim['Frequency']] = 0
+            np.place(pos1, np.logical_and(t > stimdur, t <= stimdur + rampdur),
+                     np.linspace(p1end, 0, int(round(rampdur/dt))))
 
+            pos1[t < 0] = 0
+            pos1[t > stimdur + rampdur] = 0
+
+            vel1 = 2.0 * np.pi * rostfreq * rostamp * np.cos(2 * np.pi * rostfreq * t)
+            np.place(vel1, np.logical_and(t > stimdur, t <= stimdur + rampdur),
+                     -p1end / rampdur)
+
+            vel1[t < 0] = 0
+            vel1[t > stimdur + rampdur] = 0
+        else:
+            pos1 = np.zeros_like(t)
+            vel1 = np.zeros_like(t)
 
         # generate caudal stimulus
-        pos2 = stim['Caudal amplitude'] * np.sin(2 * np.pi * (stim['Frequency'] * t -
-                                                              stim['Base phase offset'] -
-                                                              stim['Additional phase offset']))
-        p2start = stim['Caudal amplitude'] * np.sin(2 * np.pi * (-stim['Base phase offset'] -
-                                                                 stim['Additional phase offset']))
-        p2end = stim['Caudal amplitude'] * np.sin(2 * np.pi * (stim['Cycles'] - stim['Base phase offset'] -
-                                                               stim['Additional phase offset']))
+        if caudamp != 0:
+            pos2 = caudamp * np.sin(2 * np.pi * (caudfreq * t - phaseoff))
+            p2start = caudamp * np.sin(2 * np.pi * (-phaseoff))
+            p2end = caudamp * np.sin(2 * np.pi * (caudfreq * stimdur - phaseoff))
 
-        # since it has a phase offset, it may not start at zero. Ramp up to the starting position and down to the
-        # ending position
-        np.place(pos2, np.logical_and(t >= -rampdur, t < 0),
-                 np.linspace(0, p2start, int(round(rampdur/dt))))
-        np.place(pos2, np.logical_and(t > stim['Cycles'] / stim['Frequency'],
-                                      t <= stim['Cycles'] / stim['Frequency'] + rampdur),
-                 np.linspace(p2end, 0, int(round(rampdur/dt))))
+            # since it has a phase offset, it may not start at zero. Ramp up to the starting position and down to the
+            # ending position
+            np.place(pos2, np.logical_and(t >= -rampdur, t < 0),
+                     np.linspace(0, p2start, int(round(rampdur/dt))))
+            np.place(pos2, np.logical_and(t > stimdur, t <= stimdur + rampdur),
+                     np.linspace(p2end, 0, int(round(rampdur/dt))))
 
-        pos2[t < -rampdur] = 0
-        pos2[t > stim['Cycles'] / stim['Frequency'] + rampdur] = 0
+            pos2[t < -rampdur] = 0
+            pos2[t > stimdur + rampdur] = 0
 
-        vel2 = 2.0 * np.pi * stim['Frequency'] * stim['Caudal amplitude'] * \
-              np.cos(2 * np.pi * (stim['Frequency'] * t -
-                                  stim['Base phase offset'] -
-                                  stim['Additional phase offset']))
-        np.place(vel2, np.logical_and(t >= -rampdur, t < 0), p2start / rampdur)
-        np.place(vel2, np.logical_and(t > stim['Cycles'] / stim['Frequency'],
-                                      t <= stim['Cycles'] / stim['Frequency'] + rampdur),
-                 -p2end / rampdur)
+            vel2 = 2.0 * np.pi * caudfreq * caudamp * np.cos(2 * np.pi * (caudfreq * t - phaseoff))
+            np.place(vel2, np.logical_and(t >= -rampdur, t < 0), p2start / rampdur)
+            np.place(vel2, np.logical_and(t > stimdur, t <= stimdur + rampdur),
+                     -p2end / rampdur)
 
-        vel2[t < -rampdur] = 0
-        vel2[t > stim['Cycles'] / stim['Frequency'] + rampdur] = 0
+            vel2[t < -rampdur] = 0
+            vel2[t > stimdur + rampdur] = 0
+        else:
+            pos2 = np.zeros_like(t)
+            vel2 = np.zeros_like(t)
 
-        tnorm = t * stim['Frequency']
+        tnormrost = None
+        tnormcaud = None
+        try:
+            tnorm = t * stim['Rostral frequency']
+            tnormrost = tnorm
+        except Exception:
+            tnorm = t * stim['Frequency']
         tnorm[t < 0] = -1
-        tnorm[t > stim['Cycles'] / stim['Frequency']] = np.ceil(np.max(tnorm))
+        tnorm[t > stimdur] = 0
 
-        tout = np.arange(0, dur, 1.0 / self.params['DAQ', 'Output', 'Sampling frequency']) + t[0]
+        if stim['Type'] == 'Different frequencies':
+            tnormcaud = t * stim['Caudal frequency']
+            tnormcaud[t < 0] = -1
+            tnormcaud[t > stimdur] = np.ceil(stimdur / stim['Caudal frequency'])
+
+        tout = np.arange(0, totaldur, 1.0 / self.params['DAQ', 'Output', 'Sampling frequency']) + t[0]
+
+        self.t = t
+        self.tnorm = tnorm
+        self.tnormcaud = tnormcaud
+        self.tnormrost = tnormrost
+
+        self.make_perturbations()
+        if self.pert[0] is not None:
+            pos1 += self.pert[0]
+            vel1 += self.pertvel[0]
+        if self.pert[1] is not None:
+            pos2 += self.pert[1]
+            vel2 += self.pertvel[1]
 
         dig = self.make_motor_pulses(t, pos1, vel1, tout, bits=(1, 0, 2))
         self.make_motor_pulses(t, pos2, vel2, tout, out=dig, bits=(4, 3, 5))
         self.digital_out_data = dig
 
-        self.t = t
-        self.pos1 = pos1
-        self.vel1 = vel1
-        self.pos2 = pos2
-        self.vel2 = vel2
-        self.tnorm = tnorm
+        self.pos[0] = pos1
+        self.vel[0] = vel1
+        self.pos[1] = pos2
+        self.vel[1] = vel2
         self.phase = np.mod(tnorm, 1)
-        self.duration = dur
+        self.duration = totaldur
 
         self.tout = tout
 
@@ -178,7 +243,7 @@ class BenderDAQ(QtCore.QObject):
         else:
             sweeptype = stim['Frequency change']
 
-        phoff = 2*np.pi * (stim['Base phase offset'] + stim['Additional phase offset'])
+        phoff = 2*np.pi * stim['Phase offset']
 
         if sweeptype == 'Exponential':
             lnk = 1/dur * (np.log(stim['End frequency']) - np.log(stim['Start frequency']))
@@ -275,15 +340,203 @@ class BenderDAQ(QtCore.QObject):
 
         self.t = t
         self.f = f
-        self.pos1 = pos1
-        self.vel1 = vel1
-        self.pos2 = pos2
-        self.vel2 = vel2
+        self.pos[0] = pos1
+        self.vel[0] = vel1
+        self.pos[0] = pos2
+        self.vel[0] = vel2
         self.tnorm = tnorm / (2*np.pi)
         self.phase = np.mod(tnorm, 1)
         self.duration = totaldur
 
         self.tout = tout
+
+    def make_none_stimulus(self):
+        try:
+            dur = self.params['Stimulus', 'Parameters', 'Duration']
+        except Exception:
+            self.pos = None
+            self.vel = None
+            self.t = None
+            return
+
+        stim = self.params.child('Stimulus', 'Parameters')
+
+        self.nupdates = int(np.ceil(dur * self.params['DAQ', 'Update rate']))
+        dur = float(self.nupdates) / self.params['DAQ', 'Update rate']
+
+        self.duration = dur
+
+        dt = 1 / self.params['DAQ', 'Input', 'Sampling frequency']
+        self.t = np.arange(0.0, dur, dt)
+
+        pos1 = np.zeros_like(self.t)
+        vel1 = np.zeros_like(self.t)
+        pos2 = np.zeros_like(self.t)
+        vel2 = np.zeros_like(self.t)
+
+        tout = np.arange(0, dur, 1.0 / self.params['DAQ', 'Output', 'Sampling frequency']) + self.t[0]
+
+        dig = np.zeros_like(tout, dtype=np.uint32)
+
+        # dig = self.make_motor_pulses(self.t, pos1, vel1, tout, bits=(1, 0, 2))
+        # self.make_motor_pulses(self.t, pos2, vel2, tout, out=dig, bits=(4, 3, 5))
+        
+        self.digital_out_data = dig
+
+        self.pos[0] = pos1
+        self.vel[0] = vel1
+        self.pos[1] = pos2
+        self.vel[1] = vel2
+        self.tout = tout
+        self.tnorm = self.t
+        self.phase = np.array([])
+
+    def make_perturbations(self):
+        self.pertfreqs = []
+        self.pertamps = []
+        self.pertphases = []
+
+        if self.t is None:
+            return
+
+        t = self.t
+        dt = t[1] - t[0]
+
+        pert = np.zeros_like(t)
+        pertvel = np.zeros_like(t)
+
+        try:
+            pertinfo = self.params.child('Stimulus', 'Perturbations', 'Parameters')
+            basefreq = self.params['Stimulus', 'Parameters', 'Frequency']
+            ncycles = self.params['Stimulus', 'Parameters', 'Cycles']
+        except Exception:
+            return
+
+        if self.params['Stimulus', 'Perturbations', 'Type'] == 'None':
+            self.pert = [None, None]
+            self.pertvel = [None, None]
+            return
+        elif self.params['Stimulus', 'Perturbations', 'Type'] == 'Sines':
+            try:
+                freqstr = pertinfo['Frequencies']
+                phasestr = pertinfo['Phases']
+            except Exception:
+                return
+
+            try:
+                freqs = np.array([float(f) for f in freqstr.split()])
+                phases = np.array([float(p) for p in phasestr.split()])
+            except ValueError:
+                logging.warning('Could not parse perturbation frequency string')
+                return
+
+            if len(freqs) == 0:
+                return
+
+            if len(phases) < len(freqs):
+                newphases = np.random.random(size=(len(freqs)-len(phases),))
+                phases = np.append(phases, newphases)
+
+                phasestr = ' '.join(['{:.3f}'.format(p) for p in phases])
+                pertinfo['Phases'] = phasestr
+            elif len(phases) > len(freqs):
+                phases = phases[:len(freqs)]
+                phasestr = ' '.join(['{:.3f}'.format(p) for p in phases])
+                pertinfo['Phases'] = phasestr
+
+            if pertinfo['Amplitude scale'] == '% fundamental':
+                maxamp = pertinfo['Max amplitude']/100.0 * self.params['Stimulus', 'Parameters', 'Amplitude']
+            else:
+                maxamp = pertinfo['Max amplitude']
+
+            amps = np.power(freqs, -pertinfo['Amplitude frequency exponent'])
+            amps = amps / amps[0] * maxamp
+
+            startcycle = pertinfo['Start cycle']
+            stopcycle = pertinfo['Stop cycle']
+            if stopcycle <= 0:
+                stopcycle += ncycles
+            rampcycles = pertinfo['Ramp cycles']
+            rampsamples = int(rampcycles/basefreq / dt)
+
+            for a, f, p in zip(amps, freqs, phases):
+                pert1 = a * np.cos(2*np.pi*(f*t - p))
+                pert += pert1
+
+                pertvel1 = -2*np.pi*f*a * np.sin(2*np.pi*(f*t - p))
+                pertvel += pertvel1
+
+            pertramp = np.ones_like(t)
+
+            phase = t*basefreq
+            pertramp[phase < startcycle - rampcycles] = 0.0
+            np.place(pertramp, np.logical_and(phase >= startcycle - rampcycles, phase < startcycle),
+                     np.linspace(0.0, 1.0, rampsamples))
+            np.place(pertramp, np.logical_and(phase > stopcycle, phase <= stopcycle + rampcycles),
+                     np.linspace(1.0, 0.0, rampsamples))
+            pertramp[phase >= stopcycle + rampcycles] = 0.0
+
+            pert *= pertramp
+            pertvel *= pertramp
+
+            if pertinfo['Location'] == 'Caudal':
+                self.pert = [None, pert]
+                self.pertvel = [None, pertvel]
+            elif pertinfo['Location'] == 'Rostral':
+                self.pert = [pert, None]
+                self.pertvel = [pertvel, None]
+            self.pertfreqs = freqs
+            self.pertamps = amps
+            self.pertphases = phases
+
+        elif self.params['Stimulus', 'Perturbations', 'Type'] == 'Triangles':
+            startcycle = pertinfo['Start cycle']
+            amp = pertinfo['Amplitude']
+            dur = pertinfo['Duration']
+            reps = pertinfo['Repetitions']
+            phase = pertinfo['Phase']
+            gap = pertinfo['Delay in between']
+
+            totaltridur = startcycle/basefreq + (dur + gap/basefreq)*reps
+            if totaltridur > ncycles/basefreq:
+                reps = int(np.floor((ncycles/basefreq - startcycle/basefreq) / (dur + gap/basefreq)))
+                logging.warning('Only time to do {} triangles'.format(reps))
+
+                if reps == 0:
+                    return
+
+            ntri2 = round(dur/2 / dt)
+            tri = np.zeros((2*ntri2,))
+
+            tri[:ntri2] = np.linspace(0, 1, ntri2)
+            tri[ntri2:] = np.linspace(1, 0, ntri2)
+            tri *= amp
+
+            trivel = np.zeros_like(tri)
+            trivel[:ntri2] = amp/(dur/2)
+            trivel[ntri2:] = -amp/(dur/2)
+
+            pert = np.zeros_like(t)
+            pertvel = np.zeros_like(t)
+
+            pertt = []
+            for i in range(reps):
+                ttri1 = startcycle/basefreq + phase/basefreq + gap/basefreq*i
+                istri = np.logical_and(t >= ttri1 - dur/2, t < ttri1 + dur/2)
+
+                np.place(pert, istri, tri)
+                np.place(pertvel, istri, trivel)
+                pertt.append(ttri1)
+
+            if pertinfo['Location'] == 'Caudal':
+                self.pert = [None, pert]
+                self.pertvel = [None, pertvel]
+            elif pertinfo['Location'] == 'Rostral':
+                self.pert = [pert, None]
+                self.pertvel = [pertvel, None]
+
+            self.pertt = pertt
+            self.pertamps = [amp]
 
     def make_motor_stepper_pulses(self, t, pos, vel, tout, out=None, bits=(1, 0, 2)):
         poshi = interpolate.interp1d(t, pos, kind='linear', assume_sorted=True, bounds_error=False,
