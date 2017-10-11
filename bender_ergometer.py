@@ -243,6 +243,17 @@ class BenderDAQ_Ergometer(BenderDAQ):
     def __init__(self):
         super(BenderDAQ_Ergometer, self).__init__()
 
+    def make_zero_stimulus(self):
+        super(BenderDAQ_Ergometer, self).make_zero_stimulus()
+
+        if self.t is None:
+            return
+
+        self.act = None
+        self.actonoff = np.array([])
+
+        self.analog_out_data = None
+
     def make_sine_stimulus(self):
         super(BenderDAQ_Ergometer, self).make_sine_stimulus()
 
@@ -415,33 +426,37 @@ class BenderFile_Ergometer(BenderFile):
         super(BenderFile_Ergometer, self).setupFile(bender, params)
 
         # add activation parameters
-        gout = self.h5file.require_group('Output')
-
-        dset = gout.create_dataset('act', data=bender.act)
-        dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Stimulus']
         try:
-            dset.attrs['VoltScale'] = params['Stimulus', 'Parameters', 'Activation', 'Voltage scale']
-        except KeyError:
-            pass
+            if bender.act is not None:
+                gout = self.h5file.require_group('Output')
 
-        dset = gout.create_dataset('length', data=bender.lengthcmd)
-        dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Length']
-        dset.attrs['LengthScale'] = params['Motor parameters', 'Length scale']
+                dset = gout.create_dataset('act', data=bender.act)
+                dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Stimulus']
+                try:
+                    dset.attrs['VoltScale'] = params['Stimulus', 'Parameters', 'Activation', 'Voltage scale']
+                except Exception:
+                    pass
 
-        stim = params.child('Stimulus', 'Parameters')
-        if params['Stimulus', 'Type'] == 'Sine':
-            gout.attrs['ActivationOn'] = stim['Activation', 'On']
-            gout.attrs['ActivationDuty'] = stim['Activation', 'Duty']
-            gout.attrs['ActivationStartPhase'] = stim['Activation', 'Phase']
-            gout.attrs['ActivationStartCycle'] = stim['Activation', 'Start cycle']
-            gout.attrs['ActivationPulseFreq'] = stim['Activation', 'Pulse rate']
-            gout.attrs['Voltage'] = stim['Activation', 'Voltage']
-        elif params['Stimulus', 'Type'] == 'Ramp':
-            gout.attrs['ActivationDuring'] = stim['Activation', 'During']
-            gout.attrs['ActivationDuration'] = stim['Activation', 'Duration']
-            gout.attrs['ActivationDelay'] = stim['Activation', 'Delay']
-            gout.attrs['ActivationPulseFreq'] = stim['Activation', 'Pulse rate']
-            gout.attrs['Voltage'] = stim['Activation', 'Voltage']
+                dset = gout.create_dataset('length', data=bender.lengthcmd)
+                dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Length']
+                dset.attrs['LengthScale'] = params['Motor parameters', 'Length scale']
+
+                stim = params.child('Stimulus', 'Parameters')
+                if params['Stimulus', 'Type'] == 'Sine':
+                    gout.attrs['ActivationOn'] = stim['Activation', 'On']
+                    gout.attrs['ActivationDuty'] = stim['Activation', 'Duty']
+                    gout.attrs['ActivationStartPhase'] = stim['Activation', 'Phase']
+                    gout.attrs['ActivationStartCycle'] = stim['Activation', 'Start cycle']
+                    gout.attrs['ActivationPulseFreq'] = stim['Activation', 'Pulse rate']
+                    gout.attrs['Voltage'] = stim['Activation', 'Voltage']
+                elif params['Stimulus', 'Type'] == 'Ramp':
+                    gout.attrs['ActivationDuring'] = stim['Activation', 'During']
+                    gout.attrs['ActivationDuration'] = stim['Activation', 'Duration']
+                    gout.attrs['ActivationDelay'] = stim['Activation', 'Delay']
+                    gout.attrs['ActivationPulseFreq'] = stim['Activation', 'Pulse rate']
+                    gout.attrs['Voltage'] = stim['Activation', 'Voltage']
+        except Exception as err:
+            self.errors.append('Problem saving activation')
 
     def saveRawData(self, aidata, angdata, params):
         gin = self.h5file.require_group('RawInput')

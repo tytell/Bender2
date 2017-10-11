@@ -140,11 +140,19 @@ class BenderWindow(QtGui.QMainWindow):
 
         filepath = str(self.ui.outputPathEdit.text())
         filename, ext = os.path.splitext(self.curFileName)
-        with self.benderFileClass(os.path.join(filepath, filename + '.h5'), allowoverwrite=True) as benderFile:
-            benderFile.setupFile(self.bender, self.params)
-            benderFile.saveRawData(self.bender.analog_in_data, self.bender.angle_in_data, self.params)
-            if self.calibration is not None:
-                benderFile.saveCalibratedData(self.data, self.calibration, self.params)
+        try:
+            with self.benderFileClass(os.path.join(filepath, filename + '.h5'), allowoverwrite=True) as benderFile:
+                try:
+                    benderFile.setupFile(self.bender, self.params)
+                except Exception as err:
+                    logging.warning('Uncaught exception in setupFile: {}'.format(err))
+                    benderFile.errors.append(str(err))
+
+                benderFile.saveRawData(self.bender.analog_in_data, self.bender.angle_in_data, self.params)
+                if self.calibration is not None:
+                    benderFile.saveCalibratedData(self.data, self.calibration, self.params)
+        except Exception as err:
+            QtGui.QMessageBox.critical(self, 'Error saving!', str(err))
 
         self.ui.nextFileNumberBox.setValue(self.ui.nextFileNumberBox.value() + 1)
 
@@ -257,8 +265,8 @@ class BenderWindow(QtGui.QMainWindow):
 
         self.ui.plot2Widget.clear()
 
-        maxcyc = np.ceil(np.max(tnorm))
-        if xname != 'Time (sec)':
+        if (tnorm is not None) and (xname != 'Time (sec)'):
+            maxcyc = np.ceil(np.max(tnorm))
             for cyc in range(-1, int(maxcyc)):
                 iscycle = np.logical_and(tnorm >= cyc, tnorm <= cyc + 1)
                 if any(iscycle):
@@ -274,7 +282,8 @@ class BenderWindow(QtGui.QMainWindow):
         ymed = np.nanmedian(y)
         logging.debug('ymed={}'.format(ymed))
 
-        self.getWork(yctr=ymed)
+        if tnorm is not None:
+            self.getWork(yctr=ymed)
 
         self.ui.plot2Widget.autoRange()
         logging.debug('changePlot end')
@@ -524,6 +533,10 @@ class BenderWindow(QtGui.QMainWindow):
                 data['s'] = stim['Activation', 'Stim side']
             except Exception:
                 pass
+        elif stimtype == 'None':
+            data = SafeDict({'tp': 'none',
+                             'd': stim['Duration'],
+                             'num': self.ui.nextFileNumberBox.value()})
         else:
             assert False
 

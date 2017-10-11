@@ -6,6 +6,7 @@ import time
 import logging
 import numpy as np
 from scipy import integrate, interpolate
+from copy import copy
 
 from PyQt4 import QtCore
 
@@ -51,17 +52,39 @@ class BenderDAQ(QtCore.QObject):
         elif self.params['Stimulus', 'Type'] == 'Ramp':
             self.make_ramp_stimulus()
         elif self.params['Stimulus', 'Type'] == 'None':
-            self.pos = None
-            self.vel = None
-            self.duration = self.params['Stimulus', 'Parameters', 'Duration']
-            self.digital_out_data = None
-            self.tout = None
-            self.Lact = None
-            self.Ract = None
-            self.Lonoff = None
-            self.Ronoff = None
+            self.make_zero_stimulus()
         else:
             assert False
+
+    def make_zero_stimulus(self):
+        try:
+            _ = self.params['Stimulus', 'Parameters', 'Duration']
+        except Exception:
+            self.pos = None
+            self.vel = None
+            self.t = None
+            return
+
+        dur = self.params['Stimulus', 'Parameters', 'Duration']
+
+        self.nupdates = int(np.ceil(dur * self.params['DAQ', 'Update rate']))
+        dur = float(self.nupdates) / self.params['DAQ', 'Update rate']
+
+        self.duration = dur
+
+        t = np.arange(0.0, dur, 1 / self.params['DAQ', 'Input', 'Sampling frequency']) - \
+               self.params['Stimulus', 'Wait before']
+        self.t = t
+
+        self.pos = None
+        self.vel = None
+
+        self.t = t
+        self.tnorm = None
+        self.phase = None
+        self.duration = dur
+
+        self.digital_out_data = None
 
     def make_sine_stimulus(self):
         try:
@@ -419,47 +442,48 @@ class BenderDAQ(QtCore.QObject):
     def setup_channels(self):
         self.setup_input_channels()
 
-        outputParams = self.params.child('DAQ', 'Output')
+        if self.analog_out_data is not None:
+            outputParams = self.params.child('DAQ', 'Output')
 
-        self.noutsamps = int(1.0/self.params['DAQ', 'Update rate'] * outputParams['Sampling frequency'])
-        self.outputbufferlen = 2*self.noutsamps
+            self.noutsamps = int(1.0/self.params['DAQ', 'Update rate'] * outputParams['Sampling frequency'])
+            self.outputbufferlen = 2*self.noutsamps
 
-        # split the output data into blocks of noutsamps
-        padlen = self.noutsamps*self.nupdates - self.analog_out_data.shape[1]
-        if padlen > 0:
-            self.analog_out_data = np.pad(self.analog_out_data, ((0, 0), (0, padlen)), mode='edge')
-            if self.digital_out_data is not None:
-                self.digital_out_data = np.pad(self.digital_out_data, ((0,), (padlen,)), mode='edge')
-        elif padlen < 0:
-            n = self.noutsamps*self.nupdates
-            self.analog_out_data = self.analog_out_data[:, :n]
-            if self.digital_out_data is not None:
-                self.digital_out_data = self.digital_out_data[:n]
+            # split the output data into blocks of noutsamps
+            padlen = self.noutsamps*self.nupdates - self.analog_out_data.shape[1]
+            if padlen > 0:
+                self.analog_out_data = np.pad(self.analog_out_data, ((0, 0), (0, padlen)), mode='edge')
+                if self.digital_out_data is not None:
+                    self.digital_out_data = np.pad(self.digital_out_data, ((0,), (padlen,)), mode='edge')
+            elif padlen < 0:
+                n = self.noutsamps*self.nupdates
+                self.analog_out_data = self.analog_out_data[:, :n]
+                if self.digital_out_data is not None:
+                    self.digital_out_data = self.digital_out_data[:n]
 
-        assert(self.analog_out_data.shape[1] == self.noutsamps*self.nupdates)
+            assert(self.analog_out_data.shape[1] == self.noutsamps*self.nupdates)
 
-        if len(self.t) != self.nupdates*self.ninsamps:
-            self.t = np.arange(self.nupdates*self.ninsamps) / self.params['DAQ', 'Input', 'Sampling frequency']
+            if len(self.t) != self.nupdates*self.ninsamps:
+                self.t = np.arange(self.nupdates*self.ninsamps) / self.params['DAQ', 'Input', 'Sampling frequency']
 
-        self.analog_out_buffers = []
-        self.digital_out_buffers = []
-        for i in range(self.nupdates):
+            self.analog_out_buffers = []
+            self.digital_out_buffers = []
+            for i in range(self.nupdates):
+                aobuf = np.zeros((self.analog_out_data.shape[0], self.noutsamps))
+                aobuf[:, :] = self.analog_out_data[:, i*self.noutsamps + np.arange(self.noutsamps)]
+                assert(aobuf.flags.c_contiguous)
+                self.analog_out_buffers.append(aobuf)
+
+                if self.digital_out_data is not None:
+                    dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
+                    dobuf[:] = self.digital_out_data[i * self.noutsamps + np.arange(self.noutsamps)]
+                    assert (dobuf.flags.c_contiguous)
+                    self.digital_out_buffers.append(dobuf)
+
+            # write two additional buffers full of zeros
             aobuf = np.zeros((self.analog_out_data.shape[0], self.noutsamps))
-            aobuf[:, :] = self.analog_out_data[:, i*self.noutsamps + np.arange(self.noutsamps)]
-            assert(aobuf.flags.c_contiguous)
             self.analog_out_buffers.append(aobuf)
-
-            if self.digital_out_data is not None:
-                dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
-                dobuf[:] = self.digital_out_data[i * self.noutsamps + np.arange(self.noutsamps)]
-                assert (dobuf.flags.c_contiguous)
-                self.digital_out_buffers.append(dobuf)
-
-        # write two additional buffers full of zeros
-        aobuf = np.zeros((self.analog_out_data.shape[0], self.noutsamps))
-        self.analog_out_buffers.append(aobuf)
-        aobuf = np.zeros((self.analog_out_data.shape[0], self.noutsamps))
-        self.analog_out_buffers.append(aobuf)
+            aobuf = np.zeros((self.analog_out_data.shape[0], self.noutsamps))
+            self.analog_out_buffers.append(aobuf)
 
         if self.digital_out_data is not None:
             dobuf = np.zeros((self.noutsamps,), dtype=np.uint8)
@@ -468,29 +492,32 @@ class BenderDAQ(QtCore.QObject):
             self.digital_out_buffers.append(dobuf)
 
         # analog output (stimulus)
-        self.analog_out = daq.Task()
-        aobyteswritten = daq.int32()
+        if self.analog_out_data is not None:
+            self.analog_out = daq.Task()
+            aobyteswritten = daq.int32()
 
-        aochans, aonames = self.get_analog_output_names()
+            aochans, aonames = self.get_analog_output_names()
 
-        for aochan, aoname in zip(aochans, aonames):
-            self.analog_out.CreateAOVoltageChan(aochan, aoname,
-                                                -10, 10, daq.DAQmx_Val_Volts, None)
+            for aochan, aoname in zip(aochans, aonames):
+                self.analog_out.CreateAOVoltageChan(aochan, aoname,
+                                                    -10, 10, daq.DAQmx_Val_Volts, None)
 
-        # set the output sample frequency and number of samples to acquire
-        self.analog_out.CfgSampClkTiming("", outputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
-                                         daq.DAQmx_Val_ContSamps, self.outputbufferlen)
-        # make sure the output starts at the same time as the input
-        self.analog_out.CfgDigEdgeStartTrig("ai/StartTrigger", daq.DAQmx_Val_Rising)
+            # set the output sample frequency and number of samples to acquire
+            self.analog_out.CfgSampClkTiming("", outputParams['Sampling frequency'], daq.DAQmx_Val_Rising,
+                                             daq.DAQmx_Val_ContSamps, self.outputbufferlen)
+            # make sure the output starts at the same time as the input
+            self.analog_out.CfgDigEdgeStartTrig("ai/StartTrigger", daq.DAQmx_Val_Rising)
 
-        # write the output data
-        self.analog_out.SetWriteRegenMode(daq.DAQmx_Val_DoNotAllowRegen)
-        self.analog_out.WriteAnalogF64(self.outputbufferlen, False, 10,
-                                       daq.DAQmx_Val_GroupByChannel,
-                                       np.column_stack(tuple(self.analog_out_buffers[0:2])),
-                                       daq.byref(aobyteswritten), None)
+            # write the output data
+            self.analog_out.SetWriteRegenMode(daq.DAQmx_Val_DoNotAllowRegen)
+            self.analog_out.WriteAnalogF64(self.outputbufferlen, False, 10,
+                                           daq.DAQmx_Val_GroupByChannel,
+                                           np.column_stack(tuple(self.analog_out_buffers[0:2])),
+                                           daq.byref(aobyteswritten), None)
 
-        logging.debug('%d analog bytes written' % aobyteswritten.value)
+            logging.debug('%d analog bytes written' % aobyteswritten.value)
+        else:
+            self.analog_out = None
 
         # digital output (motor)
         if self.digital_out_data is not None:
@@ -536,7 +563,8 @@ class BenderDAQ(QtCore.QObject):
         # do anything until the analog input starts
         if self.digital_out is not None:
             self.digital_out.StartTask()
-        self.analog_out.StartTask()
+        if self.analog_out is not None:
+            self.analog_out.StartTask()
         if self.angle_in is not None:
             self.angle_in.StartTask()
         self.analog_in.StartTask()
@@ -570,11 +598,12 @@ class BenderDAQ(QtCore.QObject):
 
                     self.angle_in_data[self.updateNum, :] = angsgn*self.angle_in_buffer
 
-                logging.debug('%d: max = %f' % (self.updateNum, np.max(self.analog_out_buffers[self.updateNum+2])))
-                self.analog_out.WriteAnalogF64(self.noutsamps, False, 10,
-                                               daq.DAQmx_Val_GroupByChannel,
-                                               self.analog_out_buffers[self.updateNum+2],
-                                               daq.byref(aobyteswritten), None)
+                if self.analog_out is not None:
+                    logging.debug('%d: max = %f' % (self.updateNum, np.max(self.analog_out_buffers[self.updateNum+2])))
+                    self.analog_out.WriteAnalogF64(self.noutsamps, False, 10,
+                                                   daq.DAQmx_Val_GroupByChannel,
+                                                   self.analog_out_buffers[self.updateNum+2],
+                                                   daq.byref(aobyteswritten), None)
                 if self.digital_out is not None:
                     self.digital_out.WriteDigitalU8(self.noutsamps, False, 10,
                                                     daq.DAQmx_Val_GroupByChannel,
@@ -598,7 +627,8 @@ class BenderDAQ(QtCore.QObject):
 
             self.updateNum += 1
         else:
-            self.analog_out.StopTask()
+            if self.analog_out is not None:
+                self.analog_out.StopTask()
             if self.digital_out is not None:
                 self.digital_out.StopTask()
             self.analog_in.StopTask()
@@ -626,10 +656,11 @@ class BenderDAQ(QtCore.QObject):
         self.timer.timeout.disconnect(self.update)
 
         # try to stop each of the tasks, and ignore any DAQ errors
-        try:
-            self.analog_out.StopTask()
-        except daq.DAQError as err:
-            logging.debug('Error stopping analog_out: {}'.format(err))
+        if self.analog_out is not None:
+            try:
+                self.analog_out.StopTask()
+            except daq.DAQError as err:
+                logging.debug('Error stopping analog_out: {}'.format(err))
 
         if self.digital_out is not None:
             try:

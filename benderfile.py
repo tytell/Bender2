@@ -25,12 +25,15 @@ class BenderFile(object):
         else:
             mode = 'w-'
         self.h5file = h5py.File(filename, mode=mode)
+        self.errors = []
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+        if len(self.errors) != 0:
+            raise Exception(', '.join(self.errors))
 
     def setupFile(self, bender, params):
         # save the input data
@@ -45,58 +48,67 @@ class BenderFile(object):
 
         # save the parameters for generating the stimulus
         gout = self.h5file.create_group('NominalStimulus')
-        gout.create_dataset('Position', data=bender.pos)
-        gout.create_dataset('Velocity', data=bender.vel)
-        gout.create_dataset('Phase', data=bender.phase)
         gout.create_dataset('t', data=bender.t)
-        gout.create_dataset('tnorm', data=bender.tnorm)
+        if bender.pos is not None:
+            gout.create_dataset('Position', data=bender.pos)
+            gout.create_dataset('Velocity', data=bender.vel)
+            gout.create_dataset('Phase', data=bender.phase)
+            gout.create_dataset('tnorm', data=bender.tnorm)
 
         try:
-            pertparams = params.child('Stimulus', 'Perturbation', 'Parameters')
-            dset = gout.create_dataset('Perturbation', data=bender.pert)
-            if params['Stimulus', 'Perturbation', 'Type'] == 'Sines':
-                dset.attrs['Frequencies'] = bender.pertfreqs
-                dset.attrs['Amplitudes'] = bender.pertamps
-                dset.attrs['Phases'] = bender.pertphases
+            if 'Perturbation' in params.child('Stimulus'):
+                pertparams = params.child('Stimulus', 'Perturbation', 'Parameters')
+                dset = gout.create_dataset('Perturbation', data=bender.pert)
+                if params['Stimulus', 'Perturbation', 'Type'] == 'Sines':
+                    dset.attrs['Frequencies'] = bender.pertfreqs
+                    dset.attrs['Amplitudes'] = bender.pertamps
+                    dset.attrs['Phases'] = bender.pertphases
 
-                dset.attrs['MaxAmp'] = pertparams['Max amplitude']
-                dset.attrs['MaxAmpUnits'] = pertparams['Amplitude scale']
-                dset.attrs['AmplitudeFrequencyExponent'] = pertparams['Amplitude frequency exponent']
-                dset.attrs['StartCycle'] = pertparams['Start cycle']
-                dset.attrs['StopCycle'] = pertparams['Stop cycle']
-                dset.attrs['RampCycles'] = pertparams['Ramp duration']
-            elif params['Stimulus', 'Perturbation', 'Type'] == 'Trinangles':
-                dset.attrs['Duration'] = pertparams['Duration']
-                dset.attrs['Amplitude'] = pertparams['Amplitude']
-                dset.attrs['Phase'] = pertparams['Phase']
-                dset.attrs['Repetitions'] = pertparams['Repetitions']
-                dset.attrs['StartCycle'] = pertparams['Start cycle']
-                dset.attrs['DelayInBetween'] = pertparams['Delay in between']
+                    dset.attrs['MaxAmp'] = pertparams['Max amplitude']
+                    dset.attrs['MaxAmpUnits'] = pertparams['Amplitude scale']
+                    dset.attrs['AmplitudeFrequencyExponent'] = pertparams['Amplitude frequency exponent']
+                    dset.attrs['StartCycle'] = pertparams['Start cycle']
+                    dset.attrs['StopCycle'] = pertparams['Stop cycle']
+                    dset.attrs['RampCycles'] = pertparams['Ramp duration']
+                elif params['Stimulus', 'Perturbation', 'Type'] == 'Triangles':
+                    dset.attrs['Duration'] = pertparams['Duration']
+                    dset.attrs['Amplitude'] = pertparams['Amplitude']
+                    dset.attrs['Phase'] = pertparams['Phase']
+                    dset.attrs['Repetitions'] = pertparams['Repetitions']
+                    dset.attrs['StartCycle'] = pertparams['Start cycle']
+                    dset.attrs['DelayInBetween'] = pertparams['Delay in between']
         except Exception:
-            pass
+            logging.warning('Problem saving perturbations')
+            self.errors.append('Problem saving perturbations')
 
         # save the stimulus info, but not the activation parameters, because those are different between the
         # whole body rig and the ergometer setup
-        stim = params.child('Stimulus', 'Parameters')
-        if params['Stimulus', 'Type'] == 'Sine':
-            gout.attrs['Amplitude'] = stim['Amplitude']
-            gout.attrs['Frequency'] = stim['Frequency']
-            gout.attrs['Cycles'] = stim['Cycles']
-            gout.attrs['WaitPre'] = params['Stimulus', 'Wait before']
-            gout.attrs['WaitPost'] = params['Stimulus', 'Wait after']
-        elif params['Stimulus', 'Type'] == 'Frequency Sweep':
-            gout.attrs['Amplitude'] = stim['Amplitude']
-            gout.attrs['StartFrequency'] = stim['Start frequency']
-            gout.attrs['EndFrequency'] = stim['End frequency']
-            gout.attrs['FrequencyChange'] = stim['Frequency change']
-            gout.attrs['FrequencyExponent'] = stim['Frequency exponent']
-            gout.attrs['Duration'] = stim['Duration']
-            gout.attrs['WaitPre'] = params['Stimulus', 'Wait before']
-            gout.attrs['WaitPost'] = params['Stimulus', 'Wait after']
-        elif params['Stimulus', 'Type'] == 'Ramp':
-            gout.attrs['Amplitude'] = stim['Amplitude']
-            gout.attrs['Rate'] = stim['Rate']
-            gout.attrs['HoldDur'] = stim['Hold duration']
+        try:
+            stim = params.child('Stimulus', 'Parameters')
+            if params['Stimulus', 'Type'] == 'Sine':
+                gout.attrs['Amplitude'] = stim['Amplitude']
+                gout.attrs['Frequency'] = stim['Frequency']
+                gout.attrs['Cycles'] = stim['Cycles']
+                gout.attrs['WaitPre'] = params['Stimulus', 'Wait before']
+                gout.attrs['WaitPost'] = params['Stimulus', 'Wait after']
+            elif params['Stimulus', 'Type'] == 'Frequency Sweep':
+                gout.attrs['Amplitude'] = stim['Amplitude']
+                gout.attrs['StartFrequency'] = stim['Start frequency']
+                gout.attrs['EndFrequency'] = stim['End frequency']
+                gout.attrs['FrequencyChange'] = stim['Frequency change']
+                gout.attrs['FrequencyExponent'] = stim['Frequency exponent']
+                gout.attrs['Duration'] = stim['Duration']
+                gout.attrs['WaitPre'] = params['Stimulus', 'Wait before']
+                gout.attrs['WaitPost'] = params['Stimulus', 'Wait after']
+            elif params['Stimulus', 'Type'] == 'Ramp':
+                gout.attrs['Amplitude'] = stim['Amplitude']
+                gout.attrs['Rate'] = stim['Rate']
+                gout.attrs['HoldDur'] = stim['Hold duration']
+            elif params['Stimulus', 'Type'] == 'None':
+                gout.attrs['Duration'] = stim['Duration']
+        except Exception:
+            logging.warning('Problem saving stimulus parameters')
+            self.errors.append('Problem saving stimulus parameters')
 
         # save the whole parameter tree, in case I change something and forget to add it above
         gparams = self.h5file.create_group('ParameterTree')
@@ -120,13 +132,17 @@ class BenderFile(object):
                 try:
                     group.attrs.create(ch.name(), ch.value())
                 except TypeError as err:
-                    logging.debug("Error saving {} = {}: {}".format(ch.name(), ch.value(), err))
+                    errstr = "Error saving {} = {}: {}".format(ch.name(), ch.value(), err)
+                    logging.warning(errstr)
+                    self.errors.append(errstr)
                     continue
             elif ch.type() in ['list', 'str']:
                 try:
                     group.attrs.create(ch.name(), str(ch.value()))
                 except TypeError as err:
-                    logging.debug("Error saving {} = {}: {}".format(ch.name(), ch.value(), err))
+                    errstr = "Error saving {} = {}: {}".format(ch.name(), ch.value(), err)
+                    logging.warning(errstr)
+                    self.errors.append(errstr)
                     continue
 
 
