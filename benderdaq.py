@@ -21,6 +21,7 @@ from settings import SETTINGS_FILE, MOTOR_TYPE
 class BenderDAQ(QtCore.QObject):
     sigUpdate = QtCore.Signal(np.ndarray, np.ndarray, np.ndarray)  ## analog input buffer, encoder input buffer
     sigDoneAcquiring = QtCore.Signal()
+    sigDAQError = QtCore.Signal(Exception)
 
     def __init__(self):
         QtCore.QObject.__init__(self)
@@ -611,7 +612,7 @@ class BenderDAQ(QtCore.QObject):
                                                     daq.byref(dobyteswritten), None)
             except daq.DAQError as err:
                 logging.debug('Error! {}'.format(err))
-                self.abort()
+                self.abort(err)
                 return
 
             if self.angle_in_data is not None:
@@ -650,7 +651,7 @@ class BenderDAQ(QtCore.QObject):
 
             self.sigDoneAcquiring.emit()
 
-    def abort(self):
+    def abort(self, err=None):
         logging.debug('Aborting')
         self.timer.stop()
         self.timer.timeout.disconnect(self.update)
@@ -689,4 +690,6 @@ class BenderDAQ(QtCore.QObject):
         del self.digital_out
 
         self.sigDoneAcquiring.emit()
+        if err is not None:
+            self.sigDAQError.emit(err)
 

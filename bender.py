@@ -166,6 +166,9 @@ class BenderWindow(QtGui.QMainWindow):
         self.ui.overlayFromBox.currentIndexChanged.connect(self.overlayFromChanged)
         self.ui.overlayColorBox.currentIndexChanged.connect(self.overlayColorChanged)
 
+    def showDAQError(self, err):
+        QtGui.QMessageBox.critical(self, 'DAQ error', str(err))
+
     def filterChecked(self, state):
         self.data = self.filterData(buildfilter=True)
         self.updatePlot()
@@ -403,31 +406,37 @@ class BenderWindow(QtGui.QMainWindow):
     def _calcWork(self, x, angle, y, yctr=None):
         tnorm = self.bender.tnorm
 
-        maxcyc = np.max(tnorm)
-        if np.ceil(maxcyc) - maxcyc < 0.01:
-            maxcyc = np.ceil(maxcyc)
-        else:
-            maxcyc = np.floor(maxcyc)
+        if len(tnorm) < len(y):
+            tnorm = tnorm[:len(y)]
+            
+        try:
+            maxcyc = np.max(tnorm)
+            if np.ceil(maxcyc) - maxcyc < 0.01:
+                maxcyc = np.ceil(maxcyc)
+            else:
+                maxcyc = np.floor(maxcyc)
 
-        if yctr is None:
-            vr = self.ui.plot2Widget.viewRange()
-            yctr = (vr[1][1] + vr[1][0])/2
-        logging.debug('yctr = {}'.format(yctr))
+            if yctr is None:
+                vr = self.ui.plot2Widget.viewRange()
+                yctr = (vr[1][1] + vr[1][0])/2
+            logging.debug('yctr = {}'.format(yctr))
 
-        work = []
-        xmean = []
-        for c in range(0, int(maxcyc) - 1):
-            iscycle = np.logical_and(tnorm >= c, tnorm <= c + 1)
-            if any(iscycle):
-                w1 = integrate.trapz(y[iscycle], x=angle[iscycle])
-                work.append(w1)
+            work = []
+            xmean = []
+            for c in range(0, int(maxcyc) - 1):
+                iscycle = np.logical_and(tnorm >= c, tnorm <= c + 1)
+                if any(iscycle):
+                    w1 = integrate.trapz(y[iscycle], x=angle[iscycle])
+                    work.append(w1)
 
-                xmean1 = np.mean(x[iscycle])
-                xmean.append(xmean1)
+                    xmean1 = np.mean(x[iscycle])
+                    xmean.append(xmean1)
 
-                text = pg.TextItem('{:.4f}'.format(w1), color='b')
-                self.ui.plot2Widget.addItem(text)
-                text.setPos(xmean1, yctr)
+                    text = pg.TextItem('{:.4f}'.format(w1), color='b')
+                    self.ui.plot2Widget.addItem(text)
+                    text.setPos(xmean1, yctr)
+        except Exception as exc:
+            logging.debug('Error calculating work: {}'.format(exc))
 
     def browseOutputPath(self):
         outputPath = QtGui.QFileDialog.getExistingDirectory(self, "Choose output directory")

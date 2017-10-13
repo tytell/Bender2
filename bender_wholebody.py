@@ -56,6 +56,7 @@ class BenderWindow_WholeBody(BenderWindow):
 
         self.bender.sigUpdate.connect(self.updateAcquisitionPlot)
         self.bender.sigDoneAcquiring.connect(self.endAcquisition)
+        self.bender.sigDAQError.connect(self.showDAQError)
 
         self.ui.plot1Widget.setLabel('left', "Angle", units='deg')
         self.ui.plot1Widget.setLabel('bottom', "Time", units='sec')
@@ -539,14 +540,14 @@ class BenderFile_WholeBody(BenderFile):
         dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Left stimulus']
         try:
             dset.attrs['VoltScale'] = params['Stimulus', 'Parameters', 'Activation', 'Left voltage scale']
-        except KeyError:
+        except Exception:
             pass
 
         dset = gout.create_dataset('Ract', data=bender.Ract)
         dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Right stimulus']
         try:
             dset.attrs['VoltScale'] = params['Stimulus', 'Parameters', 'Activation', 'Right voltage scale']
-        except KeyError:
+        except Exception:
             pass
 
         dset = gout.create_dataset('DigitalOut', data=bender.digital_out_data)
