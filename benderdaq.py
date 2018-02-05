@@ -41,6 +41,8 @@ class BenderDAQ(QtCore.QObject):
         self.digital_out = None
         self.digital_out_data = None
 
+        self.ninchannels = None
+
     def make_stimulus(self, parameters):
         self.params = parameters
 
@@ -553,8 +555,8 @@ class BenderDAQ(QtCore.QObject):
         # allocate input buffers
         self.t_buffer = np.reshape(self.t, (self.nupdates, -1))
 
-        self.analog_in_data = np.zeros((self.nupdates, self.ninsamps, 8), dtype=np.float64)
-        self.analog_in_buffer = np.zeros((8, self.ninsamps), dtype=np.float64)
+        self.analog_in_data = np.zeros((self.nupdates, self.ninsamps, self.ninchannels), dtype=np.float64)
+        self.analog_in_buffer = np.zeros((self.ninchannels, self.ninsamps), dtype=np.float64)
         if self.angle_in is not None:
             self.angle_in_data = np.zeros((self.nupdates, self.ninsamps), dtype=np.float64)
             self.angle_in_buffer = np.zeros((self.ninsamps,), dtype=np.float64)
@@ -639,7 +641,7 @@ class BenderDAQ(QtCore.QObject):
             self.timer.stop()
             self.timer.timeout.disconnect(self.update)
 
-            self.analog_in_data = np.reshape(self.analog_in_data, (-1, 8))
+            self.analog_in_data = np.reshape(self.analog_in_data, (-1, self.ninchannels))
             if self.angle_in_data is not None:
                 self.angle_in_data = np.reshape(self.angle_in_data, (-1,))
 
@@ -679,7 +681,7 @@ class BenderDAQ(QtCore.QObject):
             except daq.DAQError as err:
                 logging.debug('Error stopping analog_out: {}'.format(err))
 
-        self.analog_in_data = np.reshape(self.analog_in_data, (-1, 8))
+        self.analog_in_data = np.reshape(self.analog_in_data, (-1, self.ninchannels))
         if self.angle_in_data is not None:
             self.angle_in_data = np.reshape(self.angle_in_data, (-1,))
 

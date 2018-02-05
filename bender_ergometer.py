@@ -31,7 +31,9 @@ pg.setConfigOption('foreground', 'k')
 class BenderWindow_Ergometer(BenderWindow):
     plotNames = {'Force': 1,
                  'Length': 0,
-                 'Stim': 2}
+                 'Stim': 2,
+                 'Stim voltage': 2,
+                 'Stim current': 3}
 
     def __init__(self):
         self.bender = BenderDAQ_Ergometer()
@@ -50,7 +52,7 @@ class BenderWindow_Ergometer(BenderWindow):
 
     def initUI(self):
         super(BenderWindow_Ergometer, self).initUI()
-        self.ui.plotYBox.addItems(['Force', 'Length', 'Stim'])
+        self.ui.plotYBox.addItems(['Force', 'Length', 'Stim voltage', 'Stim current'])
         self.ui.plotXBox.addItems(['Time (sec)', 'Time (cycles)', 'Phase', 'Length'])
 
     def setup_parameters(self):
@@ -192,6 +194,8 @@ class BenderWindow_Ergometer(BenderWindow):
         self.data0[:, self.plotNames['Length']] += self.params['Motor parameters', 'Initial length'] - \
                                                    self.data0[0, self.plotNames['Length']]
         self.data0[:, self.plotNames['Force']] *= self.params['DAQ', 'Input', 'Force scale']
+        self.data0[:, self.plotNames['Stim voltage']] *= self.params['DAQ', 'Input', 'Stim voltage scale']
+        self.data0[:, self.plotNames['Stim current']] *= self.params['DAQ', 'Input', 'Stim current scale']
 
         self.data = self.filterData()
 
@@ -243,6 +247,8 @@ class BenderDAQ_Ergometer(BenderDAQ):
     def __init__(self):
         super(BenderDAQ_Ergometer, self).__init__()
 
+        self.ninchannels = 4
+
     def make_zero_stimulus(self):
         super(BenderDAQ_Ergometer, self).make_zero_stimulus()
 
@@ -293,8 +299,13 @@ class BenderDAQ_Ergometer(BenderDAQ):
                         actonoff.append([tstart, tend])
 
             elif stim['Activation', 'Type'] == 'Generate train':
-                actpulsephase = t[np.logical_and(t > 0, t < actburstdur)] * stim['Activation','Pulse rate']
-                burst = (np.mod(actpulsephase, 1) < 0.5).astype(np.float)
+                npulses = int(np.floor(actburstdur * stim['Activation', 'Pulse rate']))
+                tburst = t[np.logical_and(t > 0, t < actburstdur)]
+                burst = np.zeros_like(tburst)
+                for i in range(npulses):
+                    tpulsestart = i/stim['Activation', 'Pulse rate']
+                    ispulse = np.logical_and(tburst >= tpulsestart, tburst < tpulsestart + stim['Activation', 'Pulse duration'])
+                    burst[ispulse] = 5.0
 
                 actphase = stim['Activation', 'Phase'] / 100.0
                 for c in range(int(stim['Activation', 'Start cycle']), int(stim['Cycles'])):
@@ -308,8 +319,6 @@ class BenderDAQ_Ergometer(BenderDAQ):
                         np.place(actcmd, np.logical_and(bendphase >= c + actphase,
                                                          bendphase < c + actphase + actburstduty),
                                  burst)
-
-                actcmd = actcmd * stim['Activation','Voltage'] / stim['Activation','Voltage scale']
 
         if any(np.abs(self.lengthcmd) > 10):
             QtGui.QMessageBox.warning(None, 'Warning', 'Movement is too large. Clipping')
@@ -343,8 +352,12 @@ class BenderDAQ_Ergometer(BenderDAQ):
         actburstdur = stim['Activation','Duration']
         actburstdur = np.ceil(actburstdur * stim['Activation','Pulse rate'] * 2) / (stim['Activation','Pulse rate'] * 2)
 
-        actpulsephase = t[np.logical_and(t > 0, t < actburstdur)] * stim['Activation','Pulse rate']
-        burst = (np.mod(actpulsephase, 1) < 0.5).astype(np.float)
+        npulses = int(np.floor(actburstdur * stim['Activation', 'Pulse rate']))
+        burst = np.zeros_like(t[np.logical_and(t > 0, t < actburstdur)])
+        for i in range(npulses):
+            tpulsestart = i / stim['Activation', 'Pulse rate']
+            ispulse = np.logical_and(t >= tpulsestart, t < tpulsestart + stim['Activation', 'Pulse duration'])
+            burst[ispulse] = 5.0
 
         actcmd = np.zeros_like(t)
         actonoff = []
@@ -401,7 +414,9 @@ class BenderDAQ_Ergometer(BenderDAQ):
                                            -10, 10, daq.DAQmx_Val_Volts, None)
         self.analog_in.CreateAIVoltageChan(inputParams['Force'], 'force', daq.DAQmx_Val_Cfg_Default,
                                            -10, 10, daq.DAQmx_Val_Volts, None)
-        self.analog_in.CreateAIVoltageChan(inputParams['Stim'], 'stim', daq.DAQmx_Val_Cfg_Default,
+        self.analog_in.CreateAIVoltageChan(inputParams['Stim voltage'], 'stimvolts', daq.DAQmx_Val_Cfg_Default,
+                                           -10, 10, daq.DAQmx_Val_Volts, None)
+        self.analog_in.CreateAIVoltageChan(inputParams['Stim current'], 'stimcurrent', daq.DAQmx_Val_Cfg_Default,
                                            -10, 10, daq.DAQmx_Val_Volts, None)
 
         self.ninsamps = int(1.0/self.params['DAQ', 'Update rate'] * inputParams['Sampling frequency'])
@@ -432,10 +447,6 @@ class BenderFile_Ergometer(BenderFile):
 
                 dset = gout.create_dataset('act', data=bender.act)
                 dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Stimulus']
-                try:
-                    dset.attrs['VoltScale'] = params['Stimulus', 'Parameters', 'Activation', 'Voltage scale']
-                except Exception:
-                    pass
 
                 dset = gout.create_dataset('length', data=bender.lengthcmd)
                 dset.attrs['HardwareChannel'] = params['DAQ', 'Output', 'Length']
@@ -448,20 +459,20 @@ class BenderFile_Ergometer(BenderFile):
                     gout.attrs['ActivationStartPhase'] = stim['Activation', 'Phase']
                     gout.attrs['ActivationStartCycle'] = stim['Activation', 'Start cycle']
                     gout.attrs['ActivationPulseFreq'] = stim['Activation', 'Pulse rate']
-                    gout.attrs['Voltage'] = stim['Activation', 'Voltage']
+                    gout.attrs['ActivationPulseDur'] = stim['Activation', 'Pulse duration']
                 elif params['Stimulus', 'Type'] == 'Ramp':
                     gout.attrs['ActivationDuring'] = stim['Activation', 'During']
                     gout.attrs['ActivationDuration'] = stim['Activation', 'Duration']
                     gout.attrs['ActivationDelay'] = stim['Activation', 'Delay']
                     gout.attrs['ActivationPulseFreq'] = stim['Activation', 'Pulse rate']
-                    gout.attrs['Voltage'] = stim['Activation', 'Voltage']
+                    gout.attrs['ActivationPulseDur'] = stim['Activation', 'Pulse duration']
         except Exception as err:
             self.errors.append('Problem saving activation')
 
     def saveRawData(self, aidata, angdata, params):
         gin = self.h5file.require_group('RawInput')
 
-        for i, aichan in enumerate(['Length', 'Force', 'Stim']):
+        for i, aichan in enumerate(['Length', 'Force', 'Stim voltage', 'Stim current']):
             dset = gin.create_dataset(aichan, data=aidata[:, i])
             dset.attrs['HardwareChannel'] = params['DAQ', 'Input', aichan]
 

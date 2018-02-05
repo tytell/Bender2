@@ -262,6 +262,8 @@ class BenderDAQ_WholeBody(BenderDAQ):
     def __init__(self):
         super(BenderDAQ_WholeBody, self).__init__()
 
+        self.ninchannels = 8
+
         if MOTOR_TYPE == 'stepper':
             self.make_motor_pulses = self.make_motor_stepper_pulses
         elif MOTOR_TYPE == 'velocity':

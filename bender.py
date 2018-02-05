@@ -245,8 +245,12 @@ class BenderWindow(QtGui.QMainWindow):
                 yunit = 'N m'
             elif 'length' in yn.lower():
                 yunit = 'mm'
-            elif 'stim' in yn.lower():
+            elif 'voltage' in yn.lower():
                 yunit = 'V'
+            elif 'current' in yn.lower():
+                yunit = 'A'
+            elif 'stim' in yn.lower():
+                yunit = 'A'
             else:
                 yunit = ''
                 logging.debug('Unrecognized y variable unit: %s', yname)

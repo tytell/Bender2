@@ -15,9 +15,8 @@ stimParameterDefs = {
             {'name': 'Phase', 'type': 'float', 'value': 0.0, 'step': 10.0, 'suffix': '%'},
             {'name': 'Type', 'type': 'list', 'values': ['Sync pulse', 'Generate train'], 'value': 'Sync pulse'},
             {'name': 'Duty', 'type': 'float', 'value': 30.0, 'step': 10.0, 'suffix': '%'},
-            {'name': 'Voltage', 'type': 'float', 'value': 2.0, 'step': 1.0, 'suffix': 'V'},
-            {'name': 'Voltage scale', 'type': 'float', 'value': 1.0, 'step': 1.0, 'suffix': 'V/V'},
             {'name': 'Pulse rate', 'type': 'float', 'value': 75.0, 'step': 5.0, 'suffix': 'Hz'},
+            {'name': 'Pulse duration', 'type': 'float', 'value': 0.001, 'step': 0.5, 'suffix': 'sec', 'siPrefix': True},
         ]}
     ],
     'Frequency Sweep': [
@@ -37,9 +36,8 @@ stimParameterDefs = {
             {'name': 'Duration', 'type': 'float', 'value': 0.3, 'step': 0.1, 'suffix': 'sec'},
             {'name': 'Delay', 'type': 'float', 'value': 0.05, 'step': 0.01, 'suffix': 'sec', 'siPrefix': True},
             {'name': 'Type', 'type': 'list', 'values': ['Sync pulse', 'Generate train'], 'value': 'Sync pulse'},
-            {'name': 'Voltage', 'type': 'float', 'value': 2.0, 'step': 1.0, 'suffix': 'V'},
-            {'name': 'Voltage scale', 'type': 'float', 'value': 1.0, 'step': 1.0, 'suffix': 'V/V'},
             {'name': 'Pulse rate', 'type': 'float', 'value': 75.0, 'step': 5.0, 'suffix': 'Hz'},
+            {'name': 'Pulse duration', 'type': 'float', 'value': 0.001, 'step': 0.5, 'suffix': 'sec', 'siPrefix': True},
         ]}
     ]
 }
@@ -78,8 +76,12 @@ parameterDefinitions = [
              'suffix': 'Hz'},
             {'name': 'Length', 'type': 'str', 'value': 'Dev1/ai0'},
             {'name': 'Force', 'type': 'str', 'value': 'Dev1/ai1'},
-            {'name': 'Stim', 'type': 'str', 'value': 'Dev1/ai2'},
             {'name': 'Force scale', 'type': 'float', 'value': 0.1, 'suffix': 'N/V'},
+            {'name': 'Stim voltage', 'type': 'str', 'value': 'Dev1/ai2'},
+            {'name': 'Stim voltage scale', 'type': 'float', 'value': 10, 'suffix': 'V/V',
+             'tip': 'Stimulator output volts per volt on the monitor'},
+            {'name': 'Stim current', 'type': 'str', 'value': 'Dev1/ai3'},
+            {'name': 'Stim current scale', 'type': 'float', 'value': 0.1, 'suffix': 'A/V'},
             {'name': 'Sign convention', 'type': 'list',
              'values': ['Lengthening is positive', 'Lengthening is negative', 'None'],
              'value': 'Lengthening is positive'}
