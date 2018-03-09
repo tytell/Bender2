@@ -249,8 +249,8 @@ class BenderDAQ(QtCore.QObject):
             lnk = 1/dur * (np.log(stim['End frequency']) - np.log(stim['Start frequency']))
 
             f = stim['Start frequency'] * np.exp(t * lnk)
-            f[t < 0] = np.nan
-            f[t > dur] = np.nan
+            f[t < 0] = 0
+            f[t > dur] = 0
 
             tnorm = 2*np.pi*stim['Start frequency'] * (np.exp(t * lnk) - 1)/lnk
 
@@ -280,22 +280,28 @@ class BenderDAQ(QtCore.QObject):
             k = (stim['End frequency'] - stim['Start frequency']) / dur
             f = stim['Start frequency'] + k * t
 
-            f[t < 0] = np.nan
-            f[t > dur] = np.nan
+            f[t < 0] = 0
+            f[t > dur] = 0
 
+            good = np.logical_and(t >= 0, t <= dur)
             tnorm = 2*np.pi*(stim['Start frequency']*t + k/2 * np.power(t, 2))
             tnormend = 2*np.pi*(stim['Start frequency']*dur + k/2 * np.power(dur, 2))
 
             b = stim['Frequency exponent']
             a0 = stim['Start frequency'] ** b
-            pos1 = stim['Rostral amplitude']/a0 * np.power(f, b) * np.sin(tnorm)
-            vel1 = stim['Rostral amplitude']/a0 * (b * k * np.power(f, b-1) * np.sin(tnorm) +
-                                          2*np.pi * np.power(f, b+1) * np.cos(tnorm))
+
+            pos1 = np.zeros_like(t)
+            vel1 = np.zeros_like(t)
+            pos1[good] = stim['Rostral amplitude']/a0 * np.power(f[good], b) * np.sin(tnorm[good])
+            vel1[good] = stim['Rostral amplitude']/a0 * (b * k * np.power(f[good], b-1) * np.sin(tnorm[good]) +
+                                          2*np.pi * np.power(f[good], b+1) * np.cos(tnorm[good]))
             p1end = stim['Caudal amplitude'] / a0 * stim['End frequency'] ** b * np.sin(tnormend)
 
-            pos2 = stim['Caudal amplitude'] / a0 * np.power(f, b) * np.sin(tnorm - phoff)
-            vel2 = stim['Caudal amplitude'] / a0 * (b * k * np.power(f, b - 1) * np.sin(tnorm - phoff) +
-                                                     2 * np.pi * np.power(f, b + 1) * np.cos(tnorm - phoff))
+            pos2 = np.zeros_like(t)
+            vel2 = np.zeros_like(t)
+            pos2[good] = stim['Caudal amplitude'] / a0 * np.power(f[good], b) * np.sin(tnorm[good] - phoff)
+            vel2[good] = stim['Caudal amplitude'] / a0 * (b * k * np.power(f[good], b - 1) * np.sin(tnorm[good] - phoff) +
+                                                     2 * np.pi * np.power(f[good], b + 1) * np.cos(tnorm[good] - phoff))
 
             p2start = stim['Caudal amplitude'] * np.sin(0.0 - phoff)
             p2end = stim['Caudal amplitude'] / a0 * stim['End frequency'] ** b * np.sin(tnormend - phoff)
@@ -342,8 +348,8 @@ class BenderDAQ(QtCore.QObject):
         self.f = f
         self.pos[0] = pos1
         self.vel[0] = vel1
-        self.pos[0] = pos2
-        self.vel[0] = vel2
+        self.pos[1] = pos2
+        self.vel[1] = vel2
         self.tnorm = tnorm / (2*np.pi)
         self.phase = np.mod(tnorm, 1)
         self.duration = totaldur

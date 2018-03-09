@@ -67,8 +67,7 @@ class BenderFile(object):
         elif params['Stimulus', 'Type'] == 'Frequency Sweep':
             gout.attrs['RostralAmplitude'] = stim['Rostral amplitude']
             gout.attrs['CaudalAmplitude'] = stim['Caudal amplitude']
-            gout.attrs['BasePhaseOffset'] = stim['Base phase offset']
-            gout.attrs['AddPhaseOffset'] = stim['Additional phase offset']
+            gout.attrs['PhaseOffset'] = stim['Phase offset']
             gout.attrs['StartFrequency'] = stim['Start frequency']
             gout.attrs['EndFrequency'] = stim['End frequency']
             gout.attrs['FrequencyChange'] = stim['Frequency change']

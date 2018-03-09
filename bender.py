@@ -325,6 +325,10 @@ class BenderWindow(QtGui.QMainWindow):
                 pw.removeItem(ln)
                 if pw != self.plotwidgets[0]:
                     self.ui.plot2Layout.removeItem(pw)
+            self.plots = self.plots[:newnchannels]
+            self.spikeplots = self.spikeplots[:newnchannels]
+            self.thresholdLines = self.thresholdLines[:newnchannels]
+            self.plotwidgets = self.plotwidgets[:newnchannels]
 
             self.nchannels = newnchannels
 
@@ -379,6 +383,7 @@ class BenderWindow(QtGui.QMainWindow):
             self.ischanneloverlay = False
 
     def changePlotType(self, index):
+        # TODO: Add plot vs caudal phase
         if index == 2 or index == 3:
             self.ui.spikeTypeCombo.setCurrentIndex(1)
 
@@ -649,6 +654,7 @@ class BenderWindow(QtGui.QMainWindow):
             self.generateStimulus()
 
     def changePerturbationType(self, param, value):
+        # TODO: Debug perturbations
         pertGroup = self.params.child('Stimulus', 'Perturbations', 'Parameters')
         self.perturbationState[self.curPertType] = pertGroup.saveState()
         try:
@@ -731,57 +737,61 @@ class BenderWindow(QtGui.QMainWindow):
             def __missing__(self, key):
                 return '{' + key + '}'
 
-        logging.debug('Stimulus/Type = {}'.format(self.params['Stimulus', 'Type']))
-        stimtype = str(self.params['Stimulus', 'Type'])
-        if stimtype == 'Sine':
-            if stim['Type'] == 'Rostral only':
-                rostamp = stim['Rostral amplitude']
-                caudamp = 0.0
-            elif stim['Type'] == 'Caudal only':
-                rostamp = 0.0
-                caudamp = stim['Caudal amplitude']
+        try:
+            logging.debug('Stimulus/Type = {}'.format(self.params['Stimulus', 'Type']))
+            stimtype = str(self.params['Stimulus', 'Type'])
+            if stimtype == 'Sine':
+                if stim['Type'] == 'Rostral only':
+                    rostamp = stim['Rostral amplitude']
+                    caudamp = 0.0
+                elif stim['Type'] == 'Caudal only':
+                    rostamp = 0.0
+                    caudamp = stim['Caudal amplitude']
+                else:
+                    rostamp = stim['Rostral amplitude']
+                    caudamp = stim['Caudal amplitude']
+
+                if stim['Type'] == 'Different frequency':
+                    rostfreq = stim['Rostral frequency']
+                    caudfreq = stim['Caudal frequency']
+                    freq = min((rostfreq, caudfreq))
+                    phaseoff = 0.0
+                else:
+                    rostfreq = stim['Frequency']
+                    caudfreq = stim['Frequency']
+                    freq = rostfreq
+                    phaseoff = stim['Phase offset']
+
+                data = SafeDict({'tp': 'sin',
+                                 'f': freq,
+                                 'rf': rostfreq,
+                                 'cf': caudfreq,
+                                 'a': caudamp,
+                                 'ca': caudamp,
+                                 'ra': rostamp,
+                                 'phoff': phaseoff,
+                                 'num': self.ui.nextFileNumberBox.value()})
+
+            elif stimtype == 'Frequency Sweep':
+                data = SafeDict({'tp': 'freqsweep',
+                                 'a': stim['Caudal amplitude'],
+                                 'ca': stim['Caudal amplitude'],
+                                 'ra': stim['Rostral amplitude'],
+                                 'f0': stim['Start frequency'],
+                                 'f1': stim['End frequency'],
+                                 'phoff': stim['Phase offset'],
+                                 'num': self.ui.nextFileNumberBox.value(),
+                                 'f': stim['Start frequency']})
+
+            elif stimtype == 'None':
+                data = SafeDict({'tp': 'none',
+                                 'num': self.ui.nextFileNumberBox.value()})
+
             else:
-                rostamp = stim['Rostral amplitude']
-                caudamp = stim['Caudal amplitude']
-
-            if stim['Type'] == 'Different frequency':
-                rostfreq = stim['Rostral frequency']
-                caudfreq = stim['Caudal frequency']
-                freq = min((rostfreq, caudfreq))
-                phaseoff = 0.0
-            else:
-                rostfreq = stim['Frequency']
-                caudfreq = stim['Frequency']
-                freq = rostfreq
-                phaseoff = stim['Phase offset']
-
-            data = SafeDict({'tp': 'sin',
-                             'f': freq,
-                             'rf': rostfreq,
-                             'cf': caudfreq,
-                             'a': caudamp,
-                             'ca': caudamp,
-                             'ra': rostamp,
-                             'phoff': phaseoff,
-                             'num': self.ui.nextFileNumberBox.value()})
-
-        elif stimtype == 'Frequency Sweep':
-            data = SafeDict({'tp': 'freqsweep',
-                             'a': stim['Caudal amplitude'],
-                             'ca': stim['Caudal amplitude'],
-                             'ra': stim['Rostral amplitude'],
-                             'f0': stim['Start frequency'],
-                             'f1': stim['End frequency'],
-                             'phoff': stim['Phase offset'],
-                             'num': self.ui.nextFileNumberBox.value(),
-                             'f': stim['Start frequency']})
-
-        elif stimtype == 'None':
+                assert False
+        except Exception:
             data = SafeDict({'tp': 'none',
-                             'num': self.ui.nextFileNumberBox.value()})
-
-        else:
-            assert False
+                                 'num': self.ui.nextFileNumberBox.value()})
 
         # default formats for the different types
         fmt = {'f': '.2f',
@@ -868,6 +878,9 @@ class BenderWindow(QtGui.QMainWindow):
 
         try:
             self.updateOutputFrequency()
+            if self.params['Stimulus', 'Type'] == 'Sine':
+                self.changeSineType(self.params.child('Stimulus', 'Parameters', 'Type'),
+                                    self.params['Stimulus', 'Parameters', 'Type'])
             self.generateStimulus(showwarning=False)
             self.initializeChannels()
             self.updateFileName()
@@ -896,6 +909,8 @@ class BenderWindow(QtGui.QMainWindow):
 
         settings.beginGroup("ParameterTree")
         self.writeParameters(settings, self.params)
+        settings.setValue("DAQ/Input/Channels/nchannels", self.nchannels)
+
         settings.endGroup()
 
     def writeParameters(self, settings, params):
@@ -932,16 +947,23 @@ class BenderWindow(QtGui.QMainWindow):
 
     def readChannels(self, settings):
         settings.beginGroup('DAQ/Input/Channels')
+        nchan, ok = settings.value('nchannels').toInt()
+        if not ok:
+            nchan = 1
+
         chansettings = settings.childKeys()
 
         channelgroup = self.params.child('DAQ', 'Input', 'Channels')
-        for i in range(chansettings.count()):
-            hwchan = str(chansettings[i])
-            if hwchan == 'Expanded':
+        i = 0
+        for hwchan in chansettings:
+            if str(hwchan) == 'Expanded':
                 continue
             channelgroup.addChild(
-                dict(name=hwchan, type='str', value=str(settings.value(hwchan).toString()),
+                dict(name=str(hwchan), type='str', value=str(settings.value(hwchan).toString()),
                      removable=True, renamable=True))
+            i += 1
+            if i == nchan:
+                break
         settings.endGroup()
 
     def closeEvent(self, event):
