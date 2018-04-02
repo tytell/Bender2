@@ -108,7 +108,6 @@ class BenderWindow(QtGui.QMainWindow):
         self.curFileName = filename
 
         self.anglePlot = self.ui.plot1Widget.plot(pen='k')
-        self.set_plot2()
 
         self.bender.start()
 
@@ -218,7 +217,7 @@ class BenderWindow(QtGui.QMainWindow):
             x = np.mod(self.bender.phase, 1)
             xunit = ''
         elif xname == 'Angle':
-            x = self.bender.encoder_in_data
+            x = self.bender.angle_in_data
             xunit = 'deg'
         elif xname == 'Length':
             x = self.length_in_data
@@ -234,6 +233,9 @@ class BenderWindow(QtGui.QMainWindow):
             y, yunit = self.getBodyTorque('X torque')
         elif yname == 'Body torque from Y force':
             y, yunit = self.getBodyTorque('Y force')
+        elif yname == 'Error':
+            yunit = 'deg'
+            y = self.bender.angle_in_data - self.bender.pos
         elif yname == 'Channel 4':
             y = self.bender.analog_in_data[:, 4]
             yunit = 'V'

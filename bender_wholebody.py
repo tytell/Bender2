@@ -65,7 +65,7 @@ class BenderWindow_WholeBody(BenderWindow):
     def initUI(self):
         super(BenderWindow_WholeBody, self).initUI()
         self.ui.plotYBox.addItems(['X torque', 'Y force', 'Body torque from X torque', 'Body torque from Y force',
-                                   'X force', 'Z force', 'Z torque', 'Channel 4', ' Channel 5'])
+                                   'X force', 'Z force', 'Z torque', 'Channel 4', ' Channel 5', 'Error'])
         self.ui.plotXBox.addItems(['Time (sec)', 'Time (cycles)', 'Phase', 'Angle'])
 
     def setup_parameters(self):

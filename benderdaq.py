@@ -156,7 +156,7 @@ class BenderDAQ(QtCore.QObject):
         totaldur = self.params['Stimulus', 'Wait before'] + stim['Duration'] + \
                    self.params['Stimulus', 'Wait after']
         self.duration = totaldur
-        self.nupdates = int(np.ceil(dur * self.params['DAQ', 'Update rate']))
+        self.nupdates = int(np.ceil(totaldur * self.params['DAQ', 'Update rate']))
 
         t = np.arange(0.0, totaldur, 1 / self.params['DAQ', 'Input', 'Sampling frequency']) - \
                self.params['Stimulus', 'Wait before']
@@ -226,9 +226,10 @@ class BenderDAQ(QtCore.QObject):
         ramp = pend + (t[isramp] - t[k])*velend
 
         np.place(vel, isramp, velend)
-        np.place(vel, isramp, ramp)
+        np.place(pos, isramp, ramp)
 
-        self.tout = np.arange(t[0], dur, 1.0 / self.params['DAQ', 'Output', 'Sampling frequency'])
+        self.tout = np.arange(0.0, totaldur, 1 / self.params['DAQ', 'Output', 'Sampling frequency']) - \
+               self.params['Stimulus', 'Wait before']
 
         self.make_motor_signal(t, pos, vel)
 
