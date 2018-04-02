@@ -547,6 +547,8 @@ class BenderDAQ(QtCore.QObject):
     def start(self):
         self.setup_channels()
 
+        self.startTime = time.localtime()
+
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self.update)
 

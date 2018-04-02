@@ -61,6 +61,8 @@ velocityDriverParams = [
 
 stepperParams = [
     {'name': 'Steps per revolution', 'type': 'float', 'value': 6400},
+    {'name': 'Scale factor', 'type': 'float', 'value': 6,
+     'tip': 'Output speed reduction. Number of output teeth divided by number of input teeth'},
     {'name': 'Sign convention', 'type': 'list', 'values': ['Left is positive', 'Left is negative', 'None'],
      'value': 'Left is positive'}
 ]

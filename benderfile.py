@@ -1,6 +1,7 @@
 from __future__ import print_function, unicode_literals
 import sys
 import os
+import time
 import string
 import h5py
 import logging
@@ -36,6 +37,8 @@ class BenderFile(object):
             raise Exception(', '.join(self.errors))
 
     def setupFile(self, bender, params):
+        self.h5file.attrs['StartTime'] = time.strftime('%Y-%m-%d %H:%M:%S %Z', bender.startTime)
+
         # save the input data
         gin = self.h5file.create_group('RawInput')
         gin.attrs['SampleFrequency'] = params['DAQ', 'Input', 'Sampling frequency']
@@ -54,6 +57,12 @@ class BenderFile(object):
             gout.create_dataset('Velocity', data=bender.vel)
             gout.create_dataset('Phase', data=bender.phase)
             gout.create_dataset('tnorm', data=bender.tnorm)
+
+        try:
+            sf = params['Motor parameters', 'Scale factor']
+        except Exception:
+            sf = 1
+        gout.attrs['ScaleFactor'] = sf
 
         try:
             if 'Perturbation' in params.child('Stimulus'):

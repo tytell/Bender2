@@ -280,6 +280,13 @@ class BenderDAQ_WholeBody(BenderDAQ):
             poshi = -poshi
             velhi = -velhi
 
+        try:
+            scale = self.params['Motor parameters', 'Scale factor']
+            poshi *= scale
+            velhi *= scale
+        except Exception:
+            pass
+
         outsampfreq = self.params['DAQ', 'Output', 'Sampling frequency']
         stepsperrev = self.params['Motor parameters', 'Steps per revolution']
         if outsampfreq == 0 or stepsperrev == 0:
