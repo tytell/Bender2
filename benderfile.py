@@ -49,7 +49,6 @@ class BenderFile(object):
 
         stim = params.child('Stimulus', 'Parameters')
         if params['Stimulus', 'Type'] == 'Sine':
-            gout.attrs['SineType'] = stim['Type']
             gout.attrs['RostralAmplitude'] = stim['Rostral amplitude']
             gout.attrs['CaudalAmplitude'] = stim['Caudal amplitude']
             try:
@@ -75,6 +74,28 @@ class BenderFile(object):
             gout.attrs['Duration'] = stim['Duration']
             gout.attrs['WaitPre'] = params['Stimulus', 'Wait before']
             gout.attrs['WaitPost'] = params['Stimulus', 'Wait after']
+
+        gout.attrs['Perturbations'] = params['Stimulus', 'Perturbations', 'Type']
+        if params['Stimulus', 'Perturbations', 'Type'] == 'Sines':
+            pertinfo = params.child('Stimulus', 'Perturbations', 'Parameters')
+
+            pout = gout.create_group('Perturbations')
+
+            for name1, freqs, amps, phases in zip(['Rostral', 'Caudal'], bender.pertfreqs,
+                                                  bender.pertamps, bender.pertphases):
+                pout.attrs[name1+'Frequencies'] = ' '.join(['{:.3f}'.format(p) for p in freqs])
+                pout.attrs[name1+'Amplitudes'] = ' '.join(['{:.3f}'.format(p) for p in amps])
+                pout.attrs[name1+'Phases'] = ' '.join(['{:.3f}'.format(p) for p in phases])
+
+            pout.attrs['StartCycle'] = pertinfo['Start cycle']
+            pout.attrs['StopCycle'] = pertinfo['Stop cycle']
+            pout.attrs['RampCycle'] = pertinfo['Ramp cycles']
+            pout.attrs['MaxAmplitude'] = pertinfo['Max amplitude']
+            pout.attrs['AmplitudeScale'] = pertinfo['Amplitude scale']
+            pout.attrs['AmplitudeFreqExp'] = pertinfo['Amplitude frequency exponent']
+
+            pout.create_dataset('Position', data=bender.pert)
+            pout.create_dataset('Velocity', data=bender.pertvel)
 
         # save the whole parameter tree, in case I change something and forget to add it above
         gparams = self.h5file.create_group('ParameterTree')

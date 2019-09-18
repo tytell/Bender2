@@ -20,8 +20,8 @@ stimParameterDefs = {
         {'name': 'Duration', 'type': 'float', 'value': 5.0, 'step': 1.0, 'suffix': 'sec'}
     ],
     'Sine': [
-        {'name': 'Type', 'type': 'list', 'values': ['Rostral only', 'Caudal only', 'Same amplitude',
-                                                    'Same frequency', 'Different frequency']},
+        #{'name': 'Type', 'type': 'list', 'values': ['Rostral only', 'Caudal only', 'Same amplitude',
+        #                                            'Same frequency', 'Different frequency']},
         {'name': 'Rostral amplitude', 'type': 'float', 'value': 15.0, 'step': 1.0, 'suffix': 'deg'},
         {'name': 'Caudal amplitude', 'type': 'float', 'value': 15.0, 'step':1.0, 'suffix': 'deg'},
         {'name': 'Distance between', 'type': 'int', 'value': 20, 'step': 1, 'suffix': 'seg'},
@@ -58,19 +58,20 @@ stepperParams = [
 perturbationDefs = {
     'None': [],
     'Sines': [
-        {'name': 'Location', 'type': 'list', 'values': ['Caudal', 'Rostral'], 'value': 'Caudal'},
+        # {'name': 'Location', 'type': 'list', 'values': ['Caudal', 'Rostral'], 'value': 'Caudal'},
         {'name': 'Start cycle', 'type': 'float', 'value': 4.0, 'step': 0.5},
         {'name': 'Stop cycle', 'type': 'float', 'value': 0.0, 'step': 0.5,
          'tip': 'Stop perturbations at cycle number. Negative numbers are cycles relative to the last one'},
         {'name': 'Ramp cycles', 'type': 'float', 'value': 0.5, 'step': 0.1,
          'tip': 'Ramp perturbations in over this period of time'},
-            {'name': 'Max amplitude', 'type': 'float', 'value': 5.0, 'suffix': '%'},
+        {'name': 'Max amplitude', 'type': 'float', 'value': 5.0, 'suffix': '%'},
         {'name': 'Amplitude scale', 'type': 'list', 'values': ['mm', '% fundamental'], 'value': '% fundamental'},
-            {'name': 'Amplitude frequency exponent', 'type': 'float', 'value': 0.25, 'step': 0.25,
+        {'name': 'Amplitude frequency exponent', 'type': 'float', 'value': 0.25, 'step': 0.25,
          'tip': 'Divide amplitudes by frequency to this exponent. 0 = no frequency scaling'},
-            {'name': 'Frequencies', 'type': 'str', 'value': ''},
-        {'name': 'Load frequencies...', 'type': 'action'},
-            {'name': 'Phases', 'type': 'str', 'value': ''},
+        {'name': 'Rostral frequencies', 'type': 'str', 'value': ''},
+        {'name': 'Rostral phases', 'type': 'str', 'value': ''},
+        {'name': 'Caudal frequencies', 'type': 'str', 'value': ''},
+        {'name': 'Caudal phases', 'type': 'str', 'value': ''},
         {'name': 'Randomize phases...', 'type': 'action'},
     ],
     'Triangles': [

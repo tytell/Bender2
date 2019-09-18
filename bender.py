@@ -70,6 +70,7 @@ class BenderWindow(QtGui.QMainWindow):
         self.curPertType = self.params['Stimulus', 'Perturbations', 'Type']
 
         self.stimParamState = dict()
+        self.perturbationState = dict()
 
         self.filter = None
 
@@ -121,10 +122,10 @@ class BenderWindow(QtGui.QMainWindow):
     def connectParameterSlots(self):
         self.params.child('Stimulus', 'Type').sigValueChanged.connect(self.changeStimType)
         self.params.child('Stimulus', 'Perturbations', 'Type').sigValueChanged.connect(self.changePerturbationType)
-        try:
-            self.params.child('Stimulus', 'Parameters', 'Type').sigValueChanged.connect(self.changeSineType)
-        except Exception:
-            pass
+        # try:
+        #     self.params.child('Stimulus', 'Parameters', 'Type').sigValueChanged.connect(self.changeSineType)
+        # except Exception:
+        #     pass
 
         self.params.child('Stimulus', 'Parameters').sigTreeStateChanged.connect(self.generateStimulus)
         self.params.child('Stimulus', 'Perturbations', 'Parameters').sigTreeStateChanged.connect(self.generateStimulus)
@@ -152,10 +153,10 @@ class BenderWindow(QtGui.QMainWindow):
         try:
             self.params.child('Stimulus', 'Type').sigValueChanged.disconnect(self.changeStimType)
             self.params.child('Stimulus', 'Perturbations', 'Type').sigValueChanged.disconnect(self.changePerturbationType)
-            try:
-                self.params.child('Stimulus', 'Parameters', 'Type').sigValueChanged.disconnect(self.changeSineType)
-            except Exception:
-                pass
+            # try:
+            #     self.params.child('Stimulus', 'Parameters', 'Type').sigValueChanged.disconnect(self.changeSineType)
+            # except Exception:
+            #     pass
             self.params.child('Stimulus', 'Parameters').sigTreeStateChanged.disconnect(self.generateStimulus)
 
             try:
@@ -654,7 +655,6 @@ class BenderWindow(QtGui.QMainWindow):
             self.generateStimulus()
 
     def changePerturbationType(self, param, value):
-        # TODO: Debug perturbations
         pertGroup = self.params.child('Stimulus', 'Perturbations', 'Parameters')
         self.perturbationState[self.curPertType] = pertGroup.saveState()
         try:
@@ -741,26 +741,26 @@ class BenderWindow(QtGui.QMainWindow):
             logging.debug('Stimulus/Type = {}'.format(self.params['Stimulus', 'Type']))
             stimtype = str(self.params['Stimulus', 'Type'])
             if stimtype == 'Sine':
-                if stim['Type'] == 'Rostral only':
-                    rostamp = stim['Rostral amplitude']
-                    caudamp = 0.0
-                elif stim['Type'] == 'Caudal only':
-                    rostamp = 0.0
-                    caudamp = stim['Caudal amplitude']
-                else:
-                    rostamp = stim['Rostral amplitude']
-                    caudamp = stim['Caudal amplitude']
+                # if stim['Type'] == 'Rostral only':
+                #     rostamp = stim['Rostral amplitude']
+                #     caudamp = 0.0
+                # elif stim['Type'] == 'Caudal only':
+                #     rostamp = 0.0
+                #     caudamp = stim['Caudal amplitude']
+                # else:
+                rostamp = stim['Rostral amplitude']
+                caudamp = stim['Caudal amplitude']
 
-                if stim['Type'] == 'Different frequency':
-                    rostfreq = stim['Rostral frequency']
-                    caudfreq = stim['Caudal frequency']
-                    freq = min((rostfreq, caudfreq))
-                    phaseoff = 0.0
-                else:
-                    rostfreq = stim['Frequency']
-                    caudfreq = stim['Frequency']
-                    freq = rostfreq
-                    phaseoff = stim['Phase offset']
+                # if stim['Type'] == 'Different frequency':
+                #     rostfreq = stim['Rostral frequency']
+                #     caudfreq = stim['Caudal frequency']
+                #     freq = min((rostfreq, caudfreq))
+                #     phaseoff = 0.0
+                # else:
+                rostfreq = stim['Frequency']
+                caudfreq = stim['Frequency']
+                freq = rostfreq
+                phaseoff = stim['Phase offset']
 
                 data = SafeDict({'tp': 'sin',
                                  'f': freq,
@@ -869,6 +869,16 @@ class BenderWindow(QtGui.QMainWindow):
                     assert False
                 self.curStimType = stimtype
 
+            if settings.contains("Stimulus/Perturbations/Type"):
+                perttype = str(settings.value("Stimulus/Perturbations/Type").toString())
+                if perttype in perturbationDefs:
+                    pertParamGroup = self.params.child('Stimulus', 'Perturbations', 'Parameters')
+                    pertParamGroup.clearChildren()
+                    pertParamGroup.addChildren(perturbationDefs[perttype])
+                else:
+                    assert False
+                self.curPertType = perttype
+
             self.readParameters(settings, self.params)
             self.readChannels(settings)
         finally:
@@ -878,15 +888,16 @@ class BenderWindow(QtGui.QMainWindow):
 
         try:
             self.updateOutputFrequency()
-            if self.params['Stimulus', 'Type'] == 'Sine':
-                self.changeSineType(self.params.child('Stimulus', 'Parameters', 'Type'),
-                                    self.params['Stimulus', 'Parameters', 'Type'])
+            # if self.params['Stimulus', 'Type'] == 'Sine':
+            #     self.changeSineType(self.params.child('Stimulus', 'Parameters', 'Type'),
+            #                         self.params['Stimulus', 'Parameters', 'Type'])
             self.generateStimulus(showwarning=False)
-            self.initializeChannels()
-            self.updateFileName()
         except ValueError:
             # skip over problems with the settings
             pass
+
+        self.initializeChannels()
+        self.updateFileName()
 
     def writeSettings(self):
         settings = QtCore.QSettings(SETTINGS_FILE, QtCore.QSettings.IniFormat)
@@ -949,6 +960,8 @@ class BenderWindow(QtGui.QMainWindow):
         settings.beginGroup('DAQ/Input/Channels')
         nchan, ok = settings.value('nchannels').toInt()
         if not ok:
+            nchan = 1
+        elif nchan == 0:
             nchan = 1
 
         chansettings = settings.childKeys()

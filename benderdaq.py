@@ -80,36 +80,13 @@ class BenderDAQ(QtCore.QObject):
         logging.debug('Stimulus.wait before = {}'.format(self.params['Stimulus', 'Wait before']))
         stim = self.params.child('Stimulus', 'Parameters')
 
-        if stim['Type'] == 'Rostral only':
-            rostamp = stim['Rostral amplitude']
-            caudamp = 0.0
-        elif stim['Type'] == 'Caudal only':
-            rostamp = 0.0
-            caudamp = stim['Caudal amplitude']
-        else:
-            rostamp = stim['Rostral amplitude']
-            caudamp = stim['Caudal amplitude']
+        rostamp = stim['Rostral amplitude']
+        caudamp = stim['Caudal amplitude']
 
-        if stim['Type'] == 'Different frequency':
-            try:
-                rostfreq = stim['Rostral frequency']
-            except Exception:
-                self.pos = [None, None]
-                self.vel = [None, None]
-                self.t = None
-                return
-
-            caudfreq = stim['Caudal frequency']
-            if rostfreq < caudfreq:
-                minfreq = rostfreq
-            else:
-                minfreq = caudfreq
-            phaseoff = 0.0
-        else:
-            rostfreq = stim['Frequency']
-            caudfreq = stim['Frequency']
-            minfreq = rostfreq
-            phaseoff = stim['Phase offset']
+        rostfreq = stim['Frequency']
+        caudfreq = stim['Frequency']
+        minfreq = rostfreq
+        phaseoff = stim['Phase offset']
 
         stimdur = stim['Cycles'] / minfreq
         totaldur = before + stimdur + after
@@ -170,27 +147,14 @@ class BenderDAQ(QtCore.QObject):
             pos2 = np.zeros_like(t)
             vel2 = np.zeros_like(t)
 
-        tnormrost = None
-        tnormcaud = None
-        try:
-            tnorm = t * stim['Rostral frequency']
-            tnormrost = tnorm
-        except Exception:
-            tnorm = t * stim['Frequency']
+        tnorm = t * stim['Frequency']
         tnorm[t < 0] = -1
         tnorm[t > stimdur] = 0
-
-        if stim['Type'] == 'Different frequencies':
-            tnormcaud = t * stim['Caudal frequency']
-            tnormcaud[t < 0] = -1
-            tnormcaud[t > stimdur] = np.ceil(stimdur / stim['Caudal frequency'])
 
         tout = np.arange(0, totaldur, 1.0 / self.params['DAQ', 'Output', 'Sampling frequency']) + t[0]
 
         self.t = t
         self.tnorm = tnorm
-        self.tnormcaud = tnormcaud
-        self.tnormrost = tnormrost
 
         self.make_perturbations()
         if self.pert[0] is not None:
@@ -408,9 +372,6 @@ class BenderDAQ(QtCore.QObject):
         t = self.t
         dt = t[1] - t[0]
 
-        pert = np.zeros_like(t)
-        pertvel = np.zeros_like(t)
-
         try:
             pertinfo = self.params.child('Stimulus', 'Perturbations', 'Parameters')
             basefreq = self.params['Stimulus', 'Parameters', 'Frequency']
@@ -424,55 +385,82 @@ class BenderDAQ(QtCore.QObject):
             return
         elif self.params['Stimulus', 'Perturbations', 'Type'] == 'Sines':
             try:
-                freqstr = pertinfo['Frequencies']
-                phasestr = pertinfo['Phases']
+                rostfreqstr = pertinfo['Rostral frequencies']
+                rostphasestr = pertinfo['Rostral phases']
+                caudfreqstr = pertinfo['Caudal frequencies']
+                caudphasestr = pertinfo['Caudal phases']
             except Exception:
                 return
 
             try:
-                freqs = np.array([float(f) for f in freqstr.split()])
-                phases = np.array([float(p) for p in phasestr.split()])
+                rostfreqs = np.array([float(f) for f in rostfreqstr.split()])
+                rostphases = np.array([float(p) for p in rostphasestr.split()])
             except ValueError:
-                logging.warning('Could not parse perturbation frequency string')
+                logging.warning('Could not parse rostral perturbation frequency string')
+                return
+            try:
+                caudfreqs = np.array([float(f) for f in caudfreqstr.split()])
+                caudphases = np.array([float(p) for p in caudphasestr.split()])
+            except ValueError:
+                logging.warning('Could not parse caudal perturbation frequency string')
                 return
 
-            if len(freqs) == 0:
-                return
+            rostamp = self.params['Stimulus', 'Parameters', 'Rostral amplitude']
+            caudamp = self.params['Stimulus', 'Parameters', 'Caudal amplitude']
 
-            if len(phases) < len(freqs):
-                newphases = np.random.random(size=(len(freqs)-len(phases),))
-                phases = np.append(phases, newphases)
+            pert = []
+            pertvel = []
+            pertamps = []
+            for amp1, freqs, phases, name1 in zip([rostamp, caudamp], [rostfreqs, caudfreqs], [rostphases, caudphases],
+                                           ['Rostral', 'Caudal']):
+                pert1 = np.zeros_like(t)
+                pertvel1 = np.zeros_like(t)
 
-                phasestr = ' '.join(['{:.3f}'.format(p) for p in phases])
-                pertinfo['Phases'] = phasestr
-            elif len(phases) > len(freqs):
-                phases = phases[:len(freqs)]
-                phasestr = ' '.join(['{:.3f}'.format(p) for p in phases])
-                pertinfo['Phases'] = phasestr
+                if len(freqs) == 0:
+                    pert.append(pert1)
+                    pertvel.append(pertvel1)
+                    continue
 
-            if pertinfo['Amplitude scale'] == '% fundamental':
-                maxamp = pertinfo['Max amplitude']/100.0 * self.params['Stimulus', 'Parameters', 'Amplitude']
-            else:
-                maxamp = pertinfo['Max amplitude']
+                if len(phases) < len(freqs):
+                    newphases = np.random.random(size=(len(freqs)-len(phases),))
+                    phases = np.append(phases, newphases)
 
-            amps = np.power(freqs, -pertinfo['Amplitude frequency exponent'])
-            amps = amps / amps[0] * maxamp
+                    phasestr = ' '.join(['{:.3f}'.format(p) for p in phases])
+                    phasename = name1 + ' phases'
+                    pertinfo[phasename] = phasestr
+                elif len(phases) > len(freqs):
+                    phases = phases[:len(freqs)]
+                    phasestr = ' '.join(['{:.3f}'.format(p) for p in phases])
+                    phasename = name1 + ' phases'
+                    pertinfo[phasename] = phasestr
+
+                if pertinfo['Amplitude scale'] == '% fundamental':
+                    maxamp = pertinfo['Max amplitude']/100.0 * amp1
+                else:
+                    maxamp = pertinfo['Max amplitude']
+
+                amps = np.power(freqs, -pertinfo['Amplitude frequency exponent'])
+                amps = amps / amps[0] * maxamp
+                pertamps.append(amps)
+
+                for a, f, p in zip(amps, freqs, phases):
+                    pert1 += a * np.cos(2*np.pi*(f*t - p))
+                    pertvel1 += -2*np.pi*f*a * np.sin(2*np.pi*(f*t - p))
+
+                pert.append(pert1)
+                pertvel.append(pertvel1)
+
+            pert = np.array(pert)
+            pertvel = np.array(pertvel)
+
+            pertramp = np.ones_like(t)
 
             startcycle = pertinfo['Start cycle']
             stopcycle = pertinfo['Stop cycle']
             if stopcycle <= 0:
                 stopcycle += ncycles
             rampcycles = pertinfo['Ramp cycles']
-            rampsamples = int(rampcycles/basefreq / dt)
-
-            for a, f, p in zip(amps, freqs, phases):
-                pert1 = a * np.cos(2*np.pi*(f*t - p))
-                pert += pert1
-
-                pertvel1 = -2*np.pi*f*a * np.sin(2*np.pi*(f*t - p))
-                pertvel += pertvel1
-
-            pertramp = np.ones_like(t)
+            rampsamples = int(rampcycles / basefreq / dt)
 
             phase = t*basefreq
             pertramp[phase < startcycle - rampcycles] = 0.0
@@ -482,18 +470,15 @@ class BenderDAQ(QtCore.QObject):
                      np.linspace(1.0, 0.0, rampsamples))
             pertramp[phase >= stopcycle + rampcycles] = 0.0
 
-            pert *= pertramp
-            pertvel *= pertramp
+            pert *= pertramp[np.newaxis, :]
+            pertvel *= pertramp[np.newaxis, :]
 
-            if pertinfo['Location'] == 'Caudal':
-                self.pert = [None, pert]
-                self.pertvel = [None, pertvel]
-            elif pertinfo['Location'] == 'Rostral':
-                self.pert = [pert, None]
-                self.pertvel = [pertvel, None]
-            self.pertfreqs = freqs
-            self.pertamps = amps
-            self.pertphases = phases
+            self.pert = pert
+            self.pertvel = pertvel
+
+            self.pertfreqs = [rostfreqs, caudfreqs]
+            self.pertamps = pertamps
+            self.pertphases = [rostphases, caudphases]
 
         elif self.params['Stimulus', 'Perturbations', 'Type'] == 'Triangles':
             startcycle = pertinfo['Start cycle']
@@ -559,7 +544,7 @@ class BenderDAQ(QtCore.QObject):
         maxspeed = stepsize * outsampfreq / 2
 
         if np.any(np.abs(vel) > maxspeed):
-            raise ValueError('Motion is too fast!')
+            pass # raise ValueError('Motion is too fast!')
 
         stepnum = np.floor(poshi / stepsize)
         dstep = np.diff(stepnum)
