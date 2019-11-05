@@ -210,6 +210,8 @@ class BenderDAQ(QtCore.QObject):
         phoff = 2*np.pi * stim['Phase offset']
 
         if sweeptype == 'Exponential':
+            if dur == 0:
+                dur = 10
             lnk = 1/dur * (np.log(stim['End frequency']) - np.log(stim['Start frequency']))
 
             f = stim['Start frequency'] * np.exp(t * lnk)
